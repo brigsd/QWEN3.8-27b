@@ -1,0 +1,20 @@
+﻿# Modelos pesados (GGUF)
+*.gguf
+*.bin
+models/
+
+# Binarios e DLLs do llama.cpp
+*.exe
+*.dll
+server/*.exe
+server/*.dll
+
+# Logs e arquivos de sessao do Aider / Interpreter
+.aider*
+.env
+*.log
+__pycache__/
+
+# Backups e temporarios
+*.tmp
+*.bak
