@@ -1,0 +1,16 @@
+# ==============================================================================
+# Dependências do Ecossistema Local: Qwen 3.8 27B + llama.cpp + Agentes
+# ==============================================================================
+
+# 1. Download de modelos do Hugging Face via CLI
+huggingface_hub[cli]>=0.23.0
+
+# 2. Agente de Código no Terminal (Experiência estilo Claude Code)
+aider-chat>=0.86.0
+
+# 3. Agente Autônomo com Controle do Sistema Operacional (CMD / PowerShell / Arquivos)
+open-interpreter>=0.4.3
+setuptools<70
+
+# 4. Utilitários de requisição HTTP e chamadas de API
+requests>=2.31.0
