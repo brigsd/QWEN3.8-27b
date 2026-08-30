@@ -1,6 +1,6 @@
 ﻿# Script para baixar o modelo Qwen 3.8 27B quantizado
-Write-Host "Instalando huggingface_hub..." -ForegroundColor Cyan
-pip install -U huggingface_hub
+Write-Host "Instalando dependencias do requirements.txt..." -ForegroundColor Cyan
+pip install -r (Join-Path (Get-Item $PSScriptRoot).Parent.FullName "requirements.txt")
 
 $dest = Join-Path (Get-Item $PSScriptRoot).Parent.FullName "models"
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
