@@ -1,6 +1,6 @@
 """
 Ferramentas Nativas do Agente Qwen 27B
-Implementações diretas de alta performance para o sistema operacional.
+Implementações diretas de alta performance para o sistema operacional + Motor BM25.
 """
 
 import os
@@ -8,6 +8,16 @@ import subprocess
 import fnmatch
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+try:
+    from retriever import indexar_e_buscar
+except ImportError:
+    try:
+        from agent.retriever import indexar_e_buscar
+    except ImportError:
+        import sys
+        sys.path.append(str(Path(__file__).parent))
+        from retriever import indexar_e_buscar
 
 def ler_arquivo(caminho: str, linha_inicio: Optional[int] = None, linha_fim: Optional[int] = None) -> str:
     """Lê o conteúdo de um arquivo de texto com suporte a encoding automático e paginação de linhas."""
@@ -77,14 +87,18 @@ def listar_pasta(caminho: str = ".", profundidade: int = 1, apenas_pastas: bool 
     _listar(p, 1)
     return "\n".join(linhas)
 
+def buscar_relevancia(query: str, caminho: str = ".", top_n: int = 3) -> str:
+    """Busca por relevância semântica e contextual usando o motor BM25 em múltiplos arquivos."""
+    return indexar_e_buscar(query=query, caminho_pasta=caminho, top_n=top_n)
+
 def buscar_texto(termo: str, caminho: str = ".", extensao: Optional[str] = None) -> str:
-    """Busca por um termo de texto dentro dos arquivos de um diretório recursivamente."""
+    """Busca por um termo exato de texto dentro dos arquivos de um diretório recursivamente."""
     p = Path(caminho).resolve()
     if not p.exists():
         return f"Erro: O caminho '{caminho}' não existe."
         
     matches = []
-    ignorar_pastas = {".git", "node_modules", ".venv", "__pycache__", "dist", "build"}
+    ignorar_pastas = {".git", "node_modules", ".venv", "__pycache__", "dist", "build", "models"}
     
     for root, dirs, files in os.walk(p):
         dirs[:] = [d for d in dirs if d not in ignorar_pastas]
@@ -176,6 +190,31 @@ ESQUEMA_FERRAMENTAS = [
     {
         "type": "function",
         "function": {
+            "name": "buscar_relevancia",
+            "description": "Busca por relevância semântica/contextual nos arquivos de um projeto usando algoritmo BM25 (RAG local super rápido). Encontra os trechos e arquivos mais pertinentes para responder a perguntas complexas sobre o código ou documentação.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A pergunta, conceito ou descrição do que você procura (ex: 'como funciona a bancada', 'regras de exportação STEP')."
+                    },
+                    "caminho": {
+                        "type": "string",
+                        "description": "Diretório do projeto a ser pesquisado (padrão '.')."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Número de arquivos mais relevantes a retornar (padrão: 3)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ler_arquivo",
             "description": "Lê o conteúdo de um arquivo de texto no disco. Pode ler o arquivo inteiro ou um intervalo de linhas.",
             "parameters": {
@@ -223,13 +262,13 @@ ESQUEMA_FERRAMENTAS = [
         "type": "function",
         "function": {
             "name": "buscar_texto",
-            "description": "Busca por uma palavra, frase ou símbolo de código em múltiplos arquivos.",
+            "description": "Busca por uma palavra, frase exata ou símbolo de código em múltiplos arquivos.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "termo": {
                         "type": "string",
-                        "description": "Texto ou símbolo a ser pesquisado."
+                        "description": "Texto ou símbolo exato a ser pesquisado."
                     },
                     "caminho": {
                         "type": "string",
@@ -314,6 +353,7 @@ ESQUEMA_FERRAMENTAS = [
 ]
 
 MAPA_FUNCOES = {
+    "buscar_relevancia": buscar_relevancia,
     "ler_arquivo": ler_arquivo,
     "listar_pasta": listar_pasta,
     "buscar_texto": buscar_texto,
