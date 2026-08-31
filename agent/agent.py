@@ -1,6 +1,6 @@
 """
 Agente Nativo Qwen 27B (CLI)
-Conecta-se ao llama-server local com Tool Calling Nativo, Motor BM25 e Gerenciador Dinâmico de MCP (/mcp).
+Conecta-se ao llama-server local com Tool Calling Nativo, Motor BM25, MCP Dinâmico (/mcp) e Prompt de Elite.
 """
 
 import sys
@@ -49,14 +49,32 @@ mcp_mgr = MCPManager()
 API_BASE = "http://127.0.0.1:8080/v1"
 MODEL_NAME = "qwen3.8-27b"
 
-PROMPT_SISTEMA_BASE = """Você é o Assistente de Engenharia e Desenvolvimento do Qwen 3.8 27B, operando diretamente no computador do usuário.
-Você possui ferramentas nativas avançadas para inspecionar diretórios, buscar relevância via BM25, ler arquivos de código/documentação, escrever e editar código, e rodar comandos no terminal.
+# Prompt de Sistema inspirado nas diretrizes do Claude Code, Antigravity e Cursor
+PROMPT_SISTEMA_BASE = """Você é o Engenheiro de Software e Assistente de Desenvolvimento de Elite do Qwen 3.8 27B, operando diretamente no computador do usuário.
 
-Diretrizes Fundamentais:
-1. NUNCA invente saídas ou conteúdos de arquivos. Use SEMPRE as ferramentas nativas (`buscar_relevancia`, `ler_arquivo`, `listar_pasta`, `buscar_texto`) para verificar os fatos antes de responder.
-2. Para perguntas conceituais ou dúvidas sobre o projeto, use `buscar_relevancia` para localizar rapidamente os documentos mais pertinentes antes de ler arquivos inteiros.
-3. Responda SEMPRE em Português (PT-BR), com explicações diretas, precisas e objetivas.
-4. Ao editar ou criar arquivos, mantenha a formatação e comentários originais.
+Postura e Diretrizes Operacionais Fundamentais:
+1. ATUAÇÃO PRÁTICA E PROATIVA (Bias for Action):
+   - Trate instruções de desenvolvimento (como criar funções, corrigir bugs, refatorar código) como ações práticas no disco. Localize o arquivo, aplique as mudanças cirúrgicas com `editar_arquivo` ou `escrever_arquivo` e relate a alteração.
+   - Para perguntas exploratórias ou de arquitetura ("como podemos fazer X?"), responda de forma concisa em 2-3 parágrafos com sua recomendação técnica e os principais trade-offs antes de implementar.
+
+2. HIERARQUIA DE BUSCA E INVESTIGAÇÃO (Sem Alucinações):
+   - NUNCA invente fatos, saídas de comandos ou conteúdos de arquivos.
+   - Para entender o contexto de um projeto ou responder dúvidas conceituais, use SEMPRE `buscar_relevancia` (BM25) primeiro para recuperar os trechos relevantes sem sobrecarregar a janela de contexto.
+   - Use `ler_arquivo` de forma paginada para verificar a implementação exata.
+
+3. EDIÇÃO CIRÚRGICA DE CÓDIGO:
+   - Ao modificar código existente, use `editar_arquivo` com correspondência exata de `texto_antigo`.
+   - Preserve rigorosamente todos os comentários, estilos, convenções e indentação do arquivo original.
+
+4. MEMÓRIA PERSISTENTE E APRENDIZADOS:
+   - Use `consultar_memoria` quando precisar recuperar decisões e convenções arquiteturais salvas em sessões passadas.
+   - Use `salvar_memoria` quando o usuário definir regras importantes ou preferências para o projeto.
+
+5. ESTILO DE COMUNICAÇÃO:
+   - Seja conciso, técnico e direto ao ponto.
+   - Não narre ações desnecessárias ("Vou abrir o arquivo..."). Execute a ferramenta silenciosamente e apresente a resposta consolidada.
+   - Ao citar código ou arquivos, use a convenção navegável `caminho/arquivo.ext:linha`.
+   - Responda SEMPRE em Português (PT-BR).
 """
 
 def testar_servidor() -> bool:
@@ -70,8 +88,6 @@ def testar_servidor() -> bool:
 def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
     """Executa o loop de raciocínio e chamada de ferramentas até a resposta final."""
     headers = {"Content-Type": "application/json"}
-    
-    # Obtem schemas apenas das ferramentas atualmente ativas
     ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
     
     while True:
@@ -80,7 +96,7 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
             "messages": historico,
             "tools": ferramentas_atuais,
             "tool_choice": "auto",
-            "temperature": 0.3
+            "temperature": 0.2
         }
         
         try:
@@ -115,33 +131,28 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
                     
                     t0 = time.time()
                     
-                    # 1. Tenta despachar pelo MCP Manager se for uma ferramenta MCP ativa
+                    # 1. Despacho MCP
                     mcp_handled, resultado_mcp = mcp_mgr.despachar(nome_func, args)
                     if mcp_handled:
                         resultado = resultado_mcp
                     else:
-                        # 2. Despacha pelas ferramentas nativas
+                        # 2. Despacho Nativo
                         resultado = despachar_ferramenta(nome_func, args)
                         
                     duracao = (time.time() - t0) * 1000
-                    
-                    # Preview no terminal
                     preview = resultado.strip().split("\n")[0] if resultado else ""
                     if len(preview) > 80:
                         preview = preview[:77] + "..."
                     console.print(f"    [dim green][OK] Concluido em {duracao:.1f}ms: {preview}[/dim green]")
                     
-                    # Adiciona a resposta da ferramenta ao histórico
                     historico.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "name": nome_func,
                         "content": resultado
                     })
-                # Continua o loop para o modelo ler o resultado das ferramentas
                 continue
                 
-            # Se terminou com resposta de texto
             conteudo_resposta = mensagem.get("content", "")
             return conteudo_resposta
             
@@ -150,7 +161,7 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
             return "Falha de conexão com o servidor local."
 
 def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
-    """Processa comandos de barra (/mcp, /limpar, /status, /ajuda). Retorna True se foi tratado."""
+    """Processa comandos de barra (/mcp, /limpar, /status, /ajuda)."""
     cmd = comando.strip().lower()
     partes = cmd.split()
     cmd_base = partes[0]
@@ -219,7 +230,7 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
 def main():
     console.print(Panel.fit(
         "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B[/bold cyan]\n"
-        "[dim]Aceleração Dual GPU • Ferramentas Nativas • Suporte a MCP Dinâmico (/mcp)[/dim]\n\n"
+        "[dim]Aceleração Dual GPU • Prompt de Elite • MCP Dinâmico (/mcp)[/dim]\n\n"
         "• Digite seu pedido em linguagem natural (ex: [yellow]leia o readme da pasta X[/yellow])\n"
         "• Digite [cyan]/mcp[/cyan] para gerenciar extensões (Mecanifica, Web, etc.)\n"
         "• Digite [bold red]sair[/bold red] para encerrar.",
@@ -254,7 +265,6 @@ def main():
                 console.print("[yellow]Encerrando agente. Até logo![/yellow]")
                 break
                 
-            # Verifica se é um comando de barra (/mcp, /status, /limpar, /ajuda)
             if entrada.startswith("/"):
                 if tratar_comando_barra(entrada, historico):
                     continue
