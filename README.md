@@ -1,17 +1,18 @@
-# 🚀 Qwen 3.8 27B Local: Dual GPU, Agente Nativo, BM25 e MCP Dinâmico
+# 🚀 Qwen 3.8 27B Local: Dual GPU, Agente Nativo, BM25, MCP Dinâmico e Skills de Elite
 
-Ambiente de execução local de alta performance para o modelo **Qwen 3.8 27B**, com aceleração por **Dual GPU (RTX 5070 + RTX 2080 Ti = 23.4 GB VRAM)**, suporte a contextos gigantes de **64k (8-bit) e 128k (4-bit)**, motor de recuperação **BM25 em Python puro** e arquitetura de **Agente Nativo com controle dinâmico de MCP (`/mcp`) sem resíduos de contexto**.
+Ambiente de execução local de alta performance para o modelo **Qwen 3.8 27B**, com aceleração por **Dual GPU (RTX 5070 + RTX 2080 Ti = 23.4 GB VRAM)**, suporte a contextos gigantes de **64k (8-bit) e 128k (4-bit)**, motor de recuperação **BM25 em Python puro**, **MCP Dinâmico (`/mcp`)** e **Skills Especializadas no padrão Claude Code (`/doctor`, `/review`, `/security`, `/simplify`, `/verify`)**.
 
 ---
 
 ## 📑 Índice
 1. [⚡ Quickstart (Início Rápido)](#-quickstart-início-rápido-em-3-passos)
-2. [🤖 Módulo do Agente Nativo com Tool Calling](#-módulo-do-agente-nativo-com-tool-calling)
-3. [🔌 Sistema de MCP Dinâmico (`/mcp` - Zero Ghost Tools)](#-sistema-de-mcp-dinâmico-mcp---zero-ghost-tools)
-4. [🔍 Motor de Busca BM25 Offline (Inspirado no Moonwalk)](#-motor-de-busca-bm25-offline)
-5. [🧠 Esquema da Janela de Contexto (64k vs 128k)](#-esquema-da-janela-de-contexto)
-6. [🖥️ Lançadores e Atalhos Disponíveis](#️-lançadores-e-atalhos-disponíveis)
-7. [⚙️ Hardware de Referência](#️-hardware-de-referência)
+2. [🚀 Skills Especializadas (Padrão Claude Code)](#-skills-especializadas-padrão-claude-code)
+3. [🤖 Módulo do Agente Nativo com Tool Calling](#-módulo-do-agente-nativo-com-tool-calling)
+4. [🔌 Sistema de MCP Dinâmico (`/mcp` - Zero Ghost Tools)](#-sistema-de-mcp-dinâmico-mcp---zero-ghost-tools)
+5. [🔍 Motor de Busca BM25 Offline (Inspirado no Moonwalk)](#-motor-de-busca-bm25-offline)
+6. [🧠 Esquema da Janela de Contexto (64k vs 128k)](#-esquema-da-janela-de-contexto)
+7. [🖥️ Lançadores e Atalhos Disponíveis](#️-lançadores-e-atalhos-disponíveis)
+8. [⚙️ Hardware de Referência](#️-hardware-de-referência)
 
 ---
 
@@ -32,6 +33,20 @@ powershell -ExecutionPolicy Bypass -File .\setup\download_model.ps1
 # (Opcional) Gerar os atalhos com 1 clique na Área de Trabalho
 powershell -ExecutionPolicy Bypass -File .\setup\create_shortcuts.ps1
 ```
+
+---
+
+## 🚀 Skills Especializadas (Padrão Claude Code)
+
+O agente inclui protocolos de raciocínio de engenharia sênior que podem ser acionados diretamente pelo chat:
+
+| Comando | Skill | Função |
+| :--- | :--- | :--- |
+| **`/doctor`** | 🩺 **Doctor** | Diagnóstico em tempo real de saúde do sistema: VRAM das duas GPUs, temperatura, status do servidor e disco. |
+| **`/review <alvo>`** | 🔍 **Code Review** | Auditoria rigorosa de código com tabela de severidade (Alta, Média, Baixa) e linhas exatas (`arquivo.ts:45`). |
+| **`/security <alvo>`** | 🛡️ **Security Review** | Auditoria de segurança OWASP (vazamento de tokens, injeção de shell, caminhos inseguros). |
+| **`/simplify <alvo>`** | ✂️ **Simplify** | Refatoração limpa para eliminar código morto, achatar lógica aninhada e reduzir complexidade cognitiva. |
+| **`/verify [pasta]`** | 🧪 **Verify** | Detecta e executa a bateria de testes (`pytest`, `npm test`, `cargo`) e analisa tracebacks de erro automaticamente. |
 
 ---
 
@@ -60,13 +75,14 @@ O projeto conta com um **Agente Autônomo próprio (`agent/`)** que se comunica 
       └─────────────────┘
 ```
 
-### 🧰 Ferramentas Nativas Base (Sempre Ativas):
+### 🧰 Ferramentas Nativas Base:
 * 🔍 **`buscar_relevancia(query, caminho, top_n)`**: Motor BM25 offline para recuperação semântica em múltiplos arquivos.
 * 📄 **`ler_arquivo(caminho, linha_inicio, linha_fim)`**: Leitura com paginação e detecção automática de encoding (UTF-8, Latin-1, CP1252).
 * 📁 **`listar_pasta(caminho, profundidade)`**: Listagem hierárquica em árvore com tamanho de arquivos.
 * 🔎 **`buscar_texto(termo, caminho, extensao)`**: Busca rápida recursiva estilo Grep/Ripgrep.
 * ✏️ **`escrever_arquivo(caminho, conteudo)`**: Criação e gravação segura de arquivos.
 * 🔧 **`editar_arquivo(caminho, texto_antigo, texto_novo)`**: Substituição cirúrgica de blocos de texto.
+* 🧠 **`salvar_memoria(chave, conteudo)` / `consultar_memoria()`**: Sistema de auto-memória persistente.
 * 💻 **`executar_comando(comando, pasta)`**: Execução de scripts no PowerShell com captura de stdout/stderr.
 
 ---
@@ -74,23 +90,6 @@ O projeto conta com um **Agente Autônomo próprio (`agent/`)** que se comunica 
 ## 🔌 Sistema de MCP Dinâmico (`/mcp` - Zero Ghost Tools)
 
 Para evitar sobrecarga de contexto e impedir que o modelo sofra com **ferramentas fantasmas** (*ghost tools*), o agente implementa **injeção e ejeção dinâmica de ferramentas em tempo de execução**:
-
-```
-                       [ Você no Chat ]
-                              │
-               ┌──────────────┴──────────────┐
-               ▼                             ▼
-       `/mcp on mecanifica`              `/mcp off`
-               │                             │
-    ⚡ Injeta ferramentas 3D       🧹 Remove 100% dos esquemas JSON
-    no payload do Qwen (10 tools)  do payload da API (volta para 7)
-               │                             │
-               ▼                             ▼
-   O modelo passa a saber         O modelo LITERALMENTE não tem
-   exportar STEP, OBJ e peças.    como chamar ou alucinar essas tools!
-```
-
-### 🎮 Comandos de Barra Disponíveis no Chat:
 
 | Comando | Função |
 | :--- | :--- |
@@ -153,7 +152,7 @@ Otimização de memória do **KV Cache** aliada ao **Flash Attention (`-fa on`)*
 | **`scripts/1-iniciar_servidor_llama.bat`** | `1 - Iniciar Servidor Qwen 27B.lnk` | Detecta GPUs e abre o menu de escolha (64k vs 128k). |
 | **`scripts/1-iniciar_servidor_128k_gigante.bat`** | `1b - Iniciar Servidor Direto (128k Gigante).lnk` | Inicia o servidor diretamente no modo 128k 4-bit. |
 | **`scripts/2-iniciar_aider_com_llama.bat`** | `2 - Abrir Claude Code Local (Aider).lnk` | Abre o Aider configurado com Diff em PT-BR. |
-| **`scripts/3-iniciar_agente_nativo.bat`** | `3 - Abrir Agente Nativo (Qwen 27B).lnk` | Abre o **Agente Nativo** interativo com BM25 e `/mcp`. |
+| **`scripts/3-iniciar_agente_nativo.bat`** | `3 - Abrir Agente Nativo (Qwen 27B).lnk` | Abre o **Agente Nativo** interativo com BM25, `/mcp` e Skills. |
 
 ---
 
