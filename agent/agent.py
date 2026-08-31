@@ -1,16 +1,21 @@
 """
-Agente Nativo Qwen 27B (CLI)
-Conecta-se ao llama-server local com Tool Calling Nativo, Motor BM25, MCP Dinâmico (/mcp) e Skills de Elite (/doctor, /review, /security, /simplify, /verify).
+Agente Nativo Qwen 27B (CLI) - Supreme Edition
+Suporte a 3 Modos de Raciocínio (Alternáveis via Shift+Tab ou /modo):
+1. ⚡ NORMAL (Direto + Min-P Sampling)
+2. 🧠 PENSAMENTO PROFUNDO (CoT + Scratchpad Interno)
+3. 🛡️ AUTO-REFLEXÃO (Geração + Auditoria e Auto-Correção)
 """
 
 import sys
+import os
+import re
 import json
 import requests
 import time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 
-# Garante suporte a UTF-8 no Windows Console
+# Suporte UTF-8 no Windows Console
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -21,7 +26,11 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.theme import Theme
 
-# Importa ferramentas nativas, MCP Manager e Skills
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.formatted_text import HTML
+
+# Importa módulos internos
 try:
     from tools import ESQUEMA_FERRAMENTAS, despachar_ferramenta
     from mcp_manager import MCPManager
@@ -52,32 +61,64 @@ mcp_mgr = MCPManager()
 API_BASE = "http://127.0.0.1:8080/v1"
 MODEL_NAME = "qwen3.8-27b"
 
-# Prompt de Sistema inspirado nas diretrizes do Claude Code, Antigravity e Cursor
+# Modos de Raciocínio
+MODOS = ["NORMAL", "DEEP_THINK", "AUTO_REFLEXAO"]
+MODO_INFO = {
+    "NORMAL": {
+        "nome": "⚡ NORMAL (Direto & Min-P)",
+        "descricao": "Respostas rápidas e objetivas com amostragem Min-P de alta precisão.",
+        "badge": "<ansigreen><b>[⚡ NORMAL]</b></ansigreen>",
+        "temp": 0.2,
+        "min_p": 0.05
+    },
+    "DEEP_THINK": {
+        "nome": "🧠 PENSAMENTO PROFUNDO (CoT)",
+        "descricao": "Ativa cadeia de raciocínio interna (<think>) antes de emitir a solução.",
+        "badge": "<ansicyan><b>[🧠 PENSAMENTO]</b></ansicyan>",
+        "temp": 0.35,
+        "min_p": 0.05
+    },
+    "AUTO_REFLEXAO": {
+        "nome": "🛡️ AUTO-REFLEXÃO (Auditoria Interna)",
+        "descricao": "Gera a solução e executa uma rodada interna de auto-crítica contra falhas e bugs.",
+        "badge": "<ansimagenta><b>[🛡️ REFLEXÃO]</b></ansimagenta>",
+        "temp": 0.25,
+        "min_p": 0.05
+    }
+}
+
+modo_atual_idx = 0
+
 PROMPT_SISTEMA_BASE = """Você é o Engenheiro de Software e Assistente de Desenvolvimento de Elite do Qwen 3.8 27B, operando diretamente no computador do usuário.
 
-Postura e Diretrizes Operacionais Fundamentais:
+Postura e Diretrizes Fundamentais:
 1. ATUAÇÃO PRÁTICA E PROATIVA (Bias for Action):
-   - Trate instruções de desenvolvimento (como criar funções, corrigir bugs, refatorar código) como ações práticas no disco. Localize o arquivo, aplique as mudanças cirúrgicas com `editar_arquivo` ou `escrever_arquivo` e relate a alteração.
-   - Para perguntas exploratórias ou de arquitetura ("como podemos fazer X?"), responda de forma concisa em 2-3 parágrafos com sua recomendação técnica e os principais trade-offs antes de implementar.
+   - Trate instruções de desenvolvimento (como criar funções, corrigir bugs, refatorar código) como ações práticas no disco. Localize o arquivo, aplique as mudanças com `editar_arquivo` ou `escrever_arquivo` e relate a alteração.
+   - Para perguntas de arquitetura, responda de forma concisa em 2-3 parágrafos com sua recomendação técnica e os trade-offs.
 
 2. HIERARQUIA DE BUSCA E INVESTIGAÇÃO (Sem Alucinações):
    - NUNCA invente fatos, saídas de comandos ou conteúdos de arquivos.
-   - Para entender o contexto de um projeto ou responder dúvidas conceituais, use SEMPRE `buscar_relevancia` (BM25) primeiro para recuperar os trechos relevantes sem sobrecarregar a janela de contexto.
+   - Para dúvidas sobre o projeto, use SEMPRE `buscar_relevancia` (BM25) primeiro para recuperar os trechos relevantes sem sobrecarregar a janela de contexto.
    - Use `ler_arquivo` de forma paginada para verificar a implementação exata.
 
 3. EDIÇÃO CIRÚRGICA DE CÓDIGO:
    - Ao modificar código existente, use `editar_arquivo` com correspondência exata de `texto_antigo`.
    - Preserve rigorosamente todos os comentários, estilos, convenções e indentação do arquivo original.
 
-4. MEMÓRIA PERSISTENTE E APRENDIZADOS:
-   - Use `consultar_memoria` quando precisar recuperar decisões e convenções arquiteturais salvas em sessões passadas.
-   - Use `salvar_memoria` quando o usuário definir regras importantes ou preferências para o projeto.
-
-5. ESTILO DE COMUNICAÇÃO:
+4. ESTILO DE COMUNICAÇÃO:
    - Seja conciso, técnico e direto ao ponto.
    - Não narre ações desnecessárias ("Vou abrir o arquivo..."). Execute a ferramenta silenciosamente e apresente a resposta consolidada.
    - Ao citar código ou arquivos, use a convenção navegável `caminho/arquivo.ext:linha`.
    - Responda SEMPRE em Português (PT-BR).
+"""
+
+PROMPT_THINK_EXTENSAO = """
+[DIRETRIZ DE PENSAMENTO PROFUNDO (DEEP THINK)]:
+Antes de responder ou executar ações no disco, elabore sua análise lógica dentro das tags `<think>` e `</think>`:
+1. Decomponha o problema em partes atômicas e mapeie dependências.
+2. Identifique possíveis armadilhas, casos de borda (entradas nulas, vazamentos) e trade-offs.
+3. Formule um plano de execução passo a passo.
+Após fechar `</think>`, emita a resposta e ferramentas com máxima precisão.
 """
 
 def testar_servidor() -> bool:
@@ -88,37 +129,46 @@ def testar_servidor() -> bool:
     except Exception:
         return False
 
-def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
-    """Executa o loop de raciocínio e chamada de ferramentas até a resposta final."""
+def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL") -> Tuple[str, Optional[str]]:
+    """Executa o loop de raciocínio com suporte ao modo selecionado."""
     headers = {"Content-Type": "application/json"}
     ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
     
+    cfg_modo = MODO_INFO[modo]
+    
+    # Ajusta o prompt de sistema se for DEEP_THINK
+    hist_local = list(historico)
+    if modo == "DEEP_THINK":
+        if hist_local and hist_local[0]["role"] == "system":
+            hist_local[0] = {"role": "system", "content": PROMPT_SISTEMA_BASE + PROMPT_THINK_EXTENSAO}
+            
     while True:
         payload = {
             "model": MODEL_NAME,
-            "messages": historico,
+            "messages": hist_local,
             "tools": ferramentas_atuais,
             "tool_choice": "auto",
-            "temperature": 0.2
+            "temperature": cfg_modo["temp"],
+            "min_p": cfg_modo["min_p"]
         }
         
         try:
-            with console.status("[cyan]Pensando...[/cyan]", spinner="dots"):
-                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=120)
+            with console.status(f"[cyan]Raciocinando no modo {cfg_modo['nome']}...[/cyan]", spinner="dots"):
+                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=180)
                 
             if res.status_code != 200:
                 console.print(f"[error]Erro do Servidor ({res.status_code}): {res.text}[/error]")
-                return "Ocorreu um erro ao comunicar com o servidor de IA."
+                return "Ocorreu um erro ao comunicar com o servidor de IA.", None
                 
             data = res.json()
             escolha = data["choices"][0]
             mensagem = escolha["message"]
             finish_reason = escolha.get("finish_reason")
             
-            # Adiciona a mensagem do assistente ao histórico
+            hist_local.append(mensagem)
             historico.append(mensagem)
             
-            # Se o modelo chamou ferramentas
+            # Chamada de ferramentas
             if finish_reason == "tool_calls" and "tool_calls" in mensagem:
                 for tool_call in mensagem["tool_calls"]:
                     func_info = tool_call["function"]
@@ -133,13 +183,10 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
                     console.print(f"  [tool]>> Executando:[/tool] [bold cyan]{nome_func}[/bold cyan]({args_resumo})")
                     
                     t0 = time.time()
-                    
-                    # 1. Despacho MCP
                     mcp_handled, resultado_mcp = mcp_mgr.despachar(nome_func, args)
                     if mcp_handled:
                         resultado = resultado_mcp
                     else:
-                        # 2. Despacho Nativo
                         resultado = despachar_ferramenta(nome_func, args)
                         
                     duracao = (time.time() - t0) * 1000
@@ -148,35 +195,88 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
                         preview = preview[:77] + "..."
                     console.print(f"    [dim green][OK] Concluido em {duracao:.1f}ms: {preview}[/dim green]")
                     
-                    historico.append({
+                    msg_tool = {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "name": nome_func,
                         "content": resultado
-                    })
+                    }
+                    hist_local.append(msg_tool)
+                    historico.append(msg_tool)
                 continue
                 
             conteudo_resposta = mensagem.get("content", "")
-            return conteudo_resposta
+            
+            # Se for modo AUTO-REFLEXAO e temos uma resposta final de código/análise
+            if modo == "AUTO_REFLEXAO" and len(conteudo_resposta) > 100:
+                with console.status("[magenta]Executando ciclo interno de Auto-Reflexão e Auditoria...[/magenta]", spinner="dots"):
+                    prompt_critica = (
+                        "Examine criticamente a resposta/código anterior. "
+                        "Identifique e corrija se houver: (1) casos de borda não tratados, (2) falhas de concorrência ou tipos, "
+                        "(3) redundâncias. Apresente a versão final corrigida e aprimorada de forma limpa."
+                    )
+                    hist_reflexao = list(hist_local) + [
+                        {"role": "user", "content": prompt_critica}
+                    ]
+                    payload_ref = {
+                        "model": MODEL_NAME,
+                        "messages": hist_reflexao,
+                        "temperature": 0.2,
+                        "min_p": 0.05
+                    }
+                    res_ref = requests.post(f"{API_BASE}/chat/completions", json=payload_ref, headers=headers, timeout=120)
+                    if res_ref.status_code == 200:
+                        conteudo_refinado = res_ref.json()["choices"][0]["message"].get("content", "")
+                        return conteudo_refinado, "Auditoria de Auto-Reflexão Aplicada"
+                        
+            # Extrai tags <think> se existirem
+            pensamento = None
+            if "<think>" in conteudo_resposta and "</think>" in conteudo_resposta:
+                partes_think = conteudo_resposta.split("</think>")
+                pensamento = partes_think[0].replace("<think>", "").strip()
+                conteudo_resposta = partes_think[1].strip()
+                
+            return conteudo_resposta, pensamento
             
         except requests.exceptions.RequestException as e:
             console.print(f"[error]Erro de rede com o llama-server: {e}[/error]")
-            return "Falha de conexão com o servidor local."
+            return "Falha de conexão com o servidor local.", None
 
 def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
-    """Processa comandos de barra (/doctor, /review, /security, /simplify, /verify, /mcp, /limpar, /status, /ajuda)."""
+    """Processa comandos de barra (/modo, /doctor, /review, /security, /simplify, /verify, /mcp, /limpar, /status, /ajuda)."""
+    global modo_atual_idx
     cmd = comando.strip()
     partes = cmd.split(maxsplit=1)
     cmd_base = partes[0].lower()
     arg = partes[1] if len(partes) > 1 else ""
     
-    # 1. SKILL: DOCTOR
-    if cmd_base in ("/doctor", "/diagnostico"):
+    # 1. ALTERNAR MODO VIA COMANDO
+    if cmd_base in ("/modo", "/mode"):
+        arg_lower = arg.lower()
+        if "think" in arg_lower or "pensar" in arg_lower or "2" in arg_lower:
+            modo_atual_idx = 1
+        elif "refle" in arg_lower or "auto" in arg_lower or "3" in arg_lower:
+            modo_atual_idx = 2
+        else:
+            modo_atual_idx = 0
+            
+        cfg = MODO_INFO[MODOS[modo_atual_idx]]
+        console.print(Panel(
+            f"• **Modo Ativo:** {cfg['nome']}\n"
+            f"• **Descrição:** {cfg['descricao']}\n"
+            f"• **Parâmetros:** Temperatura {cfg['temp']} | Min-P {cfg['min_p']}",
+            title="[bold cyan]Modo de Raciocínio Alterado[/bold cyan]",
+            border_style="cyan"
+        ))
+        return True
+
+    # 2. SKILL: DOCTOR
+    elif cmd_base in ("/doctor", "/diagnostico"):
         relatorio = executar_doctor(API_BASE, list(mcp_mgr.modulos_ativos))
         console.print(Panel(Markdown(relatorio), title="[bold cyan]Doctor - Diagnóstico Local[/bold cyan]", border_style="cyan"))
         return True
 
-    # 2. SKILL: VERIFY (Testes)
+    # 3. SKILL: VERIFY (Testes)
     elif cmd_base in ("/verify", "/testar"):
         pasta = arg or "."
         relatorio, prompt_ia = executar_verify(pasta)
@@ -184,34 +284,34 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         if prompt_ia:
             console.print("[yellow]Acionando Qwen 27B para analisar o traceback do erro...[/yellow]")
             historico.append({"role": "user", "content": prompt_ia})
-            resposta = executar_ciclo_agente(historico)
+            resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
             console.print()
             console.print(Panel(Markdown(resposta), title="[bold red]Diagnóstico de Falha (Qwen 27B)[/bold red]", border_style="red"))
         return True
 
-    # 3. SKILL: CODE REVIEW
+    # 4. SKILL: CODE REVIEW
     elif cmd_base in ("/review", "/revisar"):
         alvo = arg or "."
         prompt_rev = obter_prompt_review(alvo)
         historico.append({"role": "user", "content": prompt_rev})
         console.print(f"[cyan]Iniciando Code Review Sênior em '{alvo}'...[/cyan]")
-        resposta = executar_ciclo_agente(historico)
+        resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
         console.print(Panel(Markdown(resposta), title="[bold cyan]Code Review (Qwen 27B)[/bold cyan]", border_style="cyan"))
         return True
 
-    # 4. SKILL: SECURITY REVIEW
+    # 5. SKILL: SECURITY REVIEW
     elif cmd_base in ("/security", "/seguranca"):
         alvo = arg or "."
         prompt_sec = obter_prompt_security(alvo)
         historico.append({"role": "user", "content": prompt_sec})
         console.print(f"[cyan]Iniciando Auditoria de Segurança OWASP em '{alvo}'...[/cyan]")
-        resposta = executar_ciclo_agente(historico)
+        resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
         console.print(Panel(Markdown(resposta), title="[bold magenta]Auditoria de Segurança (Qwen 27B)[/bold magenta]", border_style="magenta"))
         return True
 
-    # 5. SKILL: SIMPLIFY
+    # 6. SKILL: SIMPLIFY
     elif cmd_base in ("/simplify", "/simplificar"):
         if not arg:
             console.print("[warning]Especifique o arquivo a ser simplificado. Ex: `/simplify src/main.py`[/warning]")
@@ -219,12 +319,12 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         prompt_simp = obter_prompt_simplify(arg)
         historico.append({"role": "user", "content": prompt_simp})
         console.print(f"[cyan]Iniciando Refatoração e Simplificação em '{arg}'...[/cyan]")
-        resposta = executar_ciclo_agente(historico)
+        resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
         console.print(Panel(Markdown(resposta), title="[bold green]Código Simplificado (Qwen 27B)[/bold green]", border_style="green"))
         return True
 
-    # 6. GERENCIADOR MCP
+    # 7. GERENCIADOR MCP
     elif cmd_base == "/mcp":
         subpartes = arg.lower().split()
         if not subpartes or subpartes[0] in ("list", "listar", "status"):
@@ -258,11 +358,12 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         return True
         
     elif cmd_base in ("/status", "/info"):
+        cfg = MODO_INFO[MODOS[modo_atual_idx]]
         ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
         modulos = list(mcp_mgr.modulos_ativos) if mcp_mgr.modulos_ativos else ["Nenhum (Apenas Nativas)"]
         console.print(Panel(
             f"• **Servidor:** {API_BASE}\n"
-            f"• **Modelo:** {MODEL_NAME}\n"
+            f"• **Modo de Raciocínio Atual:** {cfg['nome']}\n"
             f"• **Módulos MCP Ativos:** {', '.join(modulos)}\n"
             f"• **Total de Ferramentas Habilitadas:** {len(ferramentas_atuais)}\n"
             f"• **Mensagens no Histórico:** {len(historico)}",
@@ -273,17 +374,21 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         
     elif cmd_base in ("/ajuda", "/help", "/?"):
         console.print(Panel(
-            "**🚀 Skills e Comandos Rápidos do Agente:**\n\n"
-            "• `/doctor`            ➔ Checkup completo do sistema (Dual GPU, VRAM, Servidor, Disco)\n"
+            "**🧠 Modos de Raciocínio & Atalhos:**\n"
+            "• Pressione **[bold yellow]Shift + Tab[/bold yellow]** ou **[bold yellow]F2[/bold yellow]** para alternar modos em tempo real!\n"
+            "• `/modo normal`       ➔ Modo ⚡ Rápido e Direto (Min-P 0.05)\n"
+            "• `/modo think`        ➔ Modo 🧠 Pensamento Profundo (Chain of Thought)\n"
+            "• `/modo reflexao`     ➔ Modo 🛡️ Auto-Reflexão e Auditoria Interna\n\n"
+            "**🚀 Skills e Comandos:**\n"
+            "• `/doctor`            ➔ Checkup completo do sistema (Dual GPU, VRAM, Servidor)\n"
             "• `/review <alvo>`     ➔ Auditoria e Code Review Sênior com severidade e linhas\n"
-            "• `/security <alvo>`   ➔ Análise estrita de segurança e vulnerabilidades OWASP\n"
+            "• `/security <alvo>`   ➔ Análise de segurança e vulnerabilidades OWASP\n"
             "• `/simplify <alvo>`   ➔ Refatoração para remover complexidade e código morto\n"
             "• `/verify [pasta]`    ➔ Executa a bateria de testes e diagnostica falhas\n"
             "• `/mcp list/on/off`   ➔ Gerencia módulos externos sem deixar resíduos\n"
             "• `/status`            ➔ Exibe saúde e ferramentas ativas\n"
-            "• `/limpar`            ➔ Reseta a memória da sessão atual\n"
-            "• `sair` ou `exit`     ➔ Encerra o agente",
-            title="[bold cyan]Menu de Skills e Comandos[/bold cyan]",
+            "• `/limpar`            ➔ Reseta a memória da sessão atual",
+            title="[bold cyan]Menu de Skills, Modos e Comandos[/bold cyan]",
             border_style="cyan"
         ))
         return True
@@ -291,11 +396,13 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
     return False
 
 def main():
+    global modo_atual_idx
+    
     console.print(Panel.fit(
-        "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B (Skills Edition)[/bold cyan]\n"
-        "[dim]Dual GPU • Skills (/doctor, /review, /security, /simplify, /verify) • MCP Dinâmico[/dim]\n\n"
-        "• Digite seu pedido em linguagem natural (ex: [yellow]leia o readme da pasta X[/yellow])\n"
-        "• Digite [cyan]/ajuda[/cyan] para ver as novas Skills disponíveis\n"
+        "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B (Supreme Intelligence Edition)[/bold cyan]\n"
+        "[dim]Dual GPU • 3 Modos de Reasoning (Shift+Tab) • Skills de Elite • MCP Dinâmico[/dim]\n\n"
+        "• Pressione [bold yellow]Shift + Tab[/bold yellow] ou [bold yellow]F2[/bold yellow] para alternar entre: [green]⚡ NORMAL[/green] | [cyan]🧠 PENSAMENTO[/cyan] | [magenta]🛡️ REFLEXÃO[/magenta]\n"
+        "• Digite [cyan]/ajuda[/cyan] para ver todas as Skills e comandos\n"
         "• Digite [bold red]sair[/bold red] para encerrar.",
         border_style="cyan"
     ))
@@ -316,10 +423,30 @@ def main():
         {"role": "system", "content": PROMPT_SISTEMA_BASE}
     ]
     
+    # Configura prompt_toolkit com KeyBindings
+    kb = KeyBindings()
+    
+    @kb.add("s-tab")
+    def _(event):
+        global modo_atual_idx
+        modo_atual_idx = (modo_atual_idx + 1) % len(MODOS)
+        event.app.invalidate()
+        
+    @kb.add("f2")
+    def _(event):
+        global modo_atual_idx
+        modo_atual_idx = (modo_atual_idx + 1) % len(MODOS)
+        event.app.invalidate()
+        
+    session = PromptSession(key_bindings=kb)
+    
     while True:
         try:
-            console.print("[bold cyan]Você >[/bold cyan] ", end="")
-            entrada = input().strip()
+            modo_chave = MODOS[modo_atual_idx]
+            cfg = MODO_INFO[modo_chave]
+            prompt_html = HTML(f"{cfg['badge']} <ansicyan><b>Você &gt;</b></ansicyan> ")
+            
+            entrada = session.prompt(prompt_html).strip()
             
             if not entrada:
                 continue
@@ -334,12 +461,23 @@ def main():
                 
             historico.append({"role": "user", "content": entrada})
             
-            resposta = executar_ciclo_agente(historico)
+            resposta, pensamento = executar_ciclo_agente(historico, modo_chave)
             
             console.print()
+            
+            # Se houver bloco de pensamento, exibe em painel dedicado
+            if pensamento:
+                console.print(Panel(
+                    Markdown(pensamento),
+                    title="[bold cyan]🧠 Cadeia de Raciocínio Interno (Thinking Process)[/bold cyan]",
+                    border_style="dim cyan",
+                    padding=(0, 2)
+                ))
+                console.print()
+                
             console.print(Panel(
                 Markdown(resposta),
-                title="[bold cyan]Qwen 27B[/bold cyan]",
+                title=f"[bold cyan]Qwen 27B ({cfg['nome']})[/bold cyan]",
                 border_style="cyan",
                 padding=(1, 2)
             ))
