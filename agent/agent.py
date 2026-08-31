@@ -1,6 +1,6 @@
 """
 Agente Nativo Qwen 27B (CLI)
-Conecta-se ao llama-server local com Tool Calling Nativo, Motor BM25, MCP Dinâmico (/mcp) e Prompt de Elite.
+Conecta-se ao llama-server local com Tool Calling Nativo, Motor BM25, MCP Dinâmico (/mcp) e Skills de Elite (/doctor, /review, /security, /simplify, /verify).
 """
 
 import sys
@@ -21,17 +21,20 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.theme import Theme
 
-# Importa ferramentas nativas e MCP Manager
+# Importa ferramentas nativas, MCP Manager e Skills
 try:
     from tools import ESQUEMA_FERRAMENTAS, despachar_ferramenta
     from mcp_manager import MCPManager
+    from skills import executar_doctor, obter_prompt_review, obter_prompt_security, obter_prompt_simplify, executar_verify
 except ImportError:
     try:
         from agent.tools import ESQUEMA_FERRAMENTAS, despachar_ferramenta
         from agent.mcp_manager import MCPManager
+        from agent.skills import executar_doctor, obter_prompt_review, obter_prompt_security, obter_prompt_simplify, executar_verify
     except ImportError:
         import tools
         from mcp_manager import MCPManager
+        from skills import executar_doctor, obter_prompt_review, obter_prompt_security, obter_prompt_simplify, executar_verify
         ESQUEMA_FERRAMENTAS = tools.ESQUEMA_FERRAMENTAS
         despachar_ferramenta = tools.despachar_ferramenta
 
@@ -161,19 +164,76 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]]) -> str:
             return "Falha de conexão com o servidor local."
 
 def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
-    """Processa comandos de barra (/mcp, /limpar, /status, /ajuda)."""
-    cmd = comando.strip().lower()
-    partes = cmd.split()
-    cmd_base = partes[0]
+    """Processa comandos de barra (/doctor, /review, /security, /simplify, /verify, /mcp, /limpar, /status, /ajuda)."""
+    cmd = comando.strip()
+    partes = cmd.split(maxsplit=1)
+    cmd_base = partes[0].lower()
+    arg = partes[1] if len(partes) > 1 else ""
     
-    if cmd_base == "/mcp":
-        if len(partes) == 1 or partes[1] in ("list", "listar", "status"):
+    # 1. SKILL: DOCTOR
+    if cmd_base in ("/doctor", "/diagnostico"):
+        relatorio = executar_doctor(API_BASE, list(mcp_mgr.modulos_ativos))
+        console.print(Panel(Markdown(relatorio), title="[bold cyan]Doctor - Diagnóstico Local[/bold cyan]", border_style="cyan"))
+        return True
+
+    # 2. SKILL: VERIFY (Testes)
+    elif cmd_base in ("/verify", "/testar"):
+        pasta = arg or "."
+        relatorio, prompt_ia = executar_verify(pasta)
+        console.print(Panel(Markdown(relatorio), title="[bold cyan]Verify - Execução de Testes[/bold cyan]", border_style="cyan"))
+        if prompt_ia:
+            console.print("[yellow]Acionando Qwen 27B para analisar o traceback do erro...[/yellow]")
+            historico.append({"role": "user", "content": prompt_ia})
+            resposta = executar_ciclo_agente(historico)
+            console.print()
+            console.print(Panel(Markdown(resposta), title="[bold red]Diagnóstico de Falha (Qwen 27B)[/bold red]", border_style="red"))
+        return True
+
+    # 3. SKILL: CODE REVIEW
+    elif cmd_base in ("/review", "/revisar"):
+        alvo = arg or "."
+        prompt_rev = obter_prompt_review(alvo)
+        historico.append({"role": "user", "content": prompt_rev})
+        console.print(f"[cyan]Iniciando Code Review Sênior em '{alvo}'...[/cyan]")
+        resposta = executar_ciclo_agente(historico)
+        console.print()
+        console.print(Panel(Markdown(resposta), title="[bold cyan]Code Review (Qwen 27B)[/bold cyan]", border_style="cyan"))
+        return True
+
+    # 4. SKILL: SECURITY REVIEW
+    elif cmd_base in ("/security", "/seguranca"):
+        alvo = arg or "."
+        prompt_sec = obter_prompt_security(alvo)
+        historico.append({"role": "user", "content": prompt_sec})
+        console.print(f"[cyan]Iniciando Auditoria de Segurança OWASP em '{alvo}'...[/cyan]")
+        resposta = executar_ciclo_agente(historico)
+        console.print()
+        console.print(Panel(Markdown(resposta), title="[bold magenta]Auditoria de Segurança (Qwen 27B)[/bold magenta]", border_style="magenta"))
+        return True
+
+    # 5. SKILL: SIMPLIFY
+    elif cmd_base in ("/simplify", "/simplificar"):
+        if not arg:
+            console.print("[warning]Especifique o arquivo a ser simplificado. Ex: `/simplify src/main.py`[/warning]")
+            return True
+        prompt_simp = obter_prompt_simplify(arg)
+        historico.append({"role": "user", "content": prompt_simp})
+        console.print(f"[cyan]Iniciando Refatoração e Simplificação em '{arg}'...[/cyan]")
+        resposta = executar_ciclo_agente(historico)
+        console.print()
+        console.print(Panel(Markdown(resposta), title="[bold green]Código Simplificado (Qwen 27B)[/bold green]", border_style="green"))
+        return True
+
+    # 6. GERENCIADOR MCP
+    elif cmd_base == "/mcp":
+        subpartes = arg.lower().split()
+        if not subpartes or subpartes[0] in ("list", "listar", "status"):
             console.print(Panel(mcp_mgr.listar_status(), title="[bold cyan]Gerenciador MCP[/bold cyan]", border_style="cyan"))
             return True
             
-        acao = partes[1]
+        acao = subpartes[0]
         if acao == "on":
-            modulo = partes[2] if len(partes) > 2 else ""
+            modulo = subpartes[1] if len(subpartes) > 1 else ""
             if not modulo:
                 console.print("[warning]Especifique o módulo. Ex: `/mcp on mecanifica` ou `/mcp on web` ou `/mcp on all`[/warning]")
             else:
@@ -182,7 +242,7 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             return True
             
         elif acao == "off":
-            modulo = partes[2] if len(partes) > 2 else ""
+            modulo = subpartes[1] if len(subpartes) > 1 else ""
             ok, msg = mcp_mgr.desativar(modulo)
             console.print(f"[success]{msg}[/success]")
             return True
@@ -213,14 +273,17 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         
     elif cmd_base in ("/ajuda", "/help", "/?"):
         console.print(Panel(
-            "**Comandos Rápidos Disponíveis:**\n\n"
-            "• `/mcp list`        ➔ Lista os módulos MCP disponíveis e ativos\n"
-            "• `/mcp on <nome>`   ➔ Ativa um módulo MCP (ex: `/mcp on mecanifica` ou `/mcp on web`)\n"
-            "• `/mcp off [nome]`  ➔ Desativa um módulo ou todos (`/mcp off`)\n"
-            "• `/status`          ➔ Mostra ferramentas ativas e contagem de contexto\n"
-            "• `/limpar`          ➔ Reseta a memória da conversa atual\n"
-            "• `sair` ou `exit`   ➔ Fecha o agente",
-            title="[bold cyan]Ajuda e Comandos[/bold cyan]",
+            "**🚀 Skills e Comandos Rápidos do Agente:**\n\n"
+            "• `/doctor`            ➔ Checkup completo do sistema (Dual GPU, VRAM, Servidor, Disco)\n"
+            "• `/review <alvo>`     ➔ Auditoria e Code Review Sênior com severidade e linhas\n"
+            "• `/security <alvo>`   ➔ Análise estrita de segurança e vulnerabilidades OWASP\n"
+            "• `/simplify <alvo>`   ➔ Refatoração para remover complexidade e código morto\n"
+            "• `/verify [pasta]`    ➔ Executa a bateria de testes e diagnostica falhas\n"
+            "• `/mcp list/on/off`   ➔ Gerencia módulos externos sem deixar resíduos\n"
+            "• `/status`            ➔ Exibe saúde e ferramentas ativas\n"
+            "• `/limpar`            ➔ Reseta a memória da sessão atual\n"
+            "• `sair` ou `exit`     ➔ Encerra o agente",
+            title="[bold cyan]Menu de Skills e Comandos[/bold cyan]",
             border_style="cyan"
         ))
         return True
@@ -229,10 +292,10 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
 
 def main():
     console.print(Panel.fit(
-        "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B[/bold cyan]\n"
-        "[dim]Aceleração Dual GPU • Prompt de Elite • MCP Dinâmico (/mcp)[/dim]\n\n"
+        "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B (Skills Edition)[/bold cyan]\n"
+        "[dim]Dual GPU • Skills (/doctor, /review, /security, /simplify, /verify) • MCP Dinâmico[/dim]\n\n"
         "• Digite seu pedido em linguagem natural (ex: [yellow]leia o readme da pasta X[/yellow])\n"
-        "• Digite [cyan]/mcp[/cyan] para gerenciar extensões (Mecanifica, Web, etc.)\n"
+        "• Digite [cyan]/ajuda[/cyan] para ver as novas Skills disponíveis\n"
         "• Digite [bold red]sair[/bold red] para encerrar.",
         border_style="cyan"
     ))
