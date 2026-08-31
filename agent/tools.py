@@ -1,11 +1,11 @@
 """
 Ferramentas Nativas do Agente Qwen 27B
-Implementações diretas de alta performance para o sistema operacional + Motor BM25.
+Implementações diretas de alta performance para o sistema operacional + Motor BM25 + Memória Persistente.
 """
 
 import os
 import subprocess
-import fnmatch
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -18,6 +18,49 @@ except ImportError:
         import sys
         sys.path.append(str(Path(__file__).parent))
         from retriever import indexar_e_buscar
+
+MEMORY_DIR = Path.home() / ".agent_memory"
+
+def salvar_memoria(chave: str, conteudo: str) -> str:
+    """Salva uma preferência, decisão arquitetural ou aprendizado de projeto na memória persistente."""
+    try:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        arquivo = MEMORY_DIR / f"{chave.lower().strip().replace(' ', '_')}.md"
+        with open(arquivo, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+        return f"Memória persistida com sucesso sob a chave '{chave}' ({arquivo.name})."
+    except Exception as e:
+        return f"Erro ao salvar memória: {str(e)}"
+
+def consultar_memoria(chave: Optional[str] = None) -> str:
+    """Consulta anotações, decisões ou preferências salvas em sessões anteriores."""
+    if not MEMORY_DIR.exists():
+        return "Nenhuma memória registrada até o momento."
+    
+    if chave:
+        arquivo = MEMORY_DIR / f"{chave.lower().strip().replace(' ', '_')}.md"
+        if arquivo.exists():
+            try:
+                with open(arquivo, "r", encoding="utf-8") as f:
+                    return f"--- Memória [{chave}] ---\n" + f.read()
+            except Exception as e:
+                return f"Erro ao ler memória '{chave}': {str(e)}"
+        return f"Nenhuma memória encontrada para a chave '{chave}'."
+        
+    # Lista todas as memórias salvas
+    memorias = []
+    for f in MEMORY_DIR.glob("*.md"):
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                conteudo = fp.read().strip()
+                resumo = conteudo.splitlines()[0] if conteudo else "Vazio"
+                memorias.append(f"• **{f.stem}**: {resumo}")
+        except Exception:
+            continue
+            
+    if not memorias:
+        return "Nenhuma memória persistida encontrada."
+    return "🧠 **Caderno de Memórias Salvas:**\n" + "\n".join(memorias)
 
 def ler_arquivo(caminho: str, linha_inicio: Optional[int] = None, linha_fim: Optional[int] = None) -> str:
     """Lê o conteúdo de um arquivo de texto com suporte a encoding automático e paginação de linhas."""
@@ -308,7 +351,7 @@ ESQUEMA_FERRAMENTAS = [
         "type": "function",
         "function": {
             "name": "editar_arquivo",
-            "description": "Substitui um bloco específico de texto dentro de um arquivo existente.",
+            "description": "Substitui um bloco específico de texto dentro de um arquivo existente com precisão cirúrgica.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -326,6 +369,43 @@ ESQUEMA_FERRAMENTAS = [
                     }
                 },
                 "required": ["caminho", "texto_antigo", "texto_novo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "salvar_memoria",
+            "description": "Salva uma decisão arquitetural, preferência do usuário ou convenção do projeto na memória persistente de longo prazo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chave": {
+                        "type": "string",
+                        "description": "Título identificador da memória (ex: 'convencoes_projeto', 'estilo_codigo')."
+                    },
+                    "conteudo": {
+                        "type": "string",
+                        "description": "A anotação ou aprendizado a persistir."
+                    }
+                },
+                "required": ["chave", "conteudo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_memoria",
+            "description": "Recupera anotações e aprendizados persistidos em sessões anteriores.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chave": {
+                        "type": "string",
+                        "description": "Chave da memória a consultar (opcional; deixe vazio para listar todas)."
+                    }
+                }
             }
         }
     },
@@ -359,6 +439,8 @@ MAPA_FUNCOES = {
     "buscar_texto": buscar_texto,
     "escrever_arquivo": escrever_arquivo,
     "editar_arquivo": editar_arquivo,
+    "salvar_memoria": salvar_memoria,
+    "consultar_memoria": consultar_memoria,
     "executar_comando": executar_comando
 }
 
