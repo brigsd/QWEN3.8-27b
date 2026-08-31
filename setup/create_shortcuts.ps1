@@ -1,4 +1,5 @@
 ﻿$serverDir = Join-Path (Get-Item $PSScriptRoot).Parent.FullName "server"
+$agentDir = Join-Path (Get-Item $PSScriptRoot).Parent.FullName "agent"
 $WshShell = New-Object -ComObject WScript.Shell
 $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
 
@@ -17,9 +18,9 @@ $s2.TargetPath = "$serverDir\2-iniciar_aider_com_llama.bat"
 $s2.WorkingDirectory = $serverDir
 $s2.Save()
 
-$s3 = $WshShell.CreateShortcut("$desktop\3 - Abrir Agente com Acesso ao PC (Open Interpreter).lnk")
-$s3.TargetPath = "$serverDir\4-iniciar_open_interpreter.bat"
-$s3.WorkingDirectory = $serverDir
+$s3 = $WshShell.CreateShortcut("$desktop\3 - Abrir Agente Nativo (Qwen 27B).lnk")
+$s3.TargetPath = "$serverDir\3-iniciar_agente_nativo.bat"
+$s3.WorkingDirectory = $agentDir
 $s3.Save()
 
 Write-Host "Atalhos criados com sucesso na Area de Trabalho!" -ForegroundColor Green
