@@ -33,12 +33,15 @@ echo.
 echo ====================================================================
 choice /C 123456 /N /M "Selecione uma opcao (1 a 6): "
 
-if errorlevel 6 goto glm_4bit
-if errorlevel 5 goto glm_8bit
-if errorlevel 4 goto glm_16bit
-if errorlevel 3 goto qwen_turbo
-if errorlevel 2 goto qwen_128k
-if errorlevel 1 goto qwen_64k
+set OPCAO=%ERRORLEVEL%
+
+if "%OPCAO%"=="1" goto qwen_64k
+if "%OPCAO%"=="2" goto qwen_128k
+if "%OPCAO%"=="3" goto qwen_turbo
+if "%OPCAO%"=="4" goto glm_16bit
+if "%OPCAO%"=="5" goto glm_8bit
+if "%OPCAO%"=="6" goto glm_4bit
+goto fim
 
 :qwen_64k
 echo.
@@ -59,52 +62,45 @@ llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf -md ..\models\qwen2.5-0.5b
 goto fim
 
 :glm_16bit
-echo.
-echo Iniciando GLM (16-bit FP16 KV Cache)...
-call :executar_glm f16 f16 32768
-goto fim
+set CTK=f16
+set CTV=f16
+set CTX=32768
+goto rodar_glm
 
 :glm_8bit
-echo.
-echo Iniciando GLM (8-bit Q8_0 KV Cache)...
-call :executar_glm q8_0 q8_0 65536
-goto fim
+set CTK=q8_0
+set CTV=q8_0
+set CTX=65536
+goto rodar_glm
 
 :glm_4bit
-echo.
-echo Iniciando GLM (4-bit Q4_0 KV Cache)...
-call :executar_glm q4_0 q4_0 131072
-goto fim
+set CTK=q4_0
+set CTV=q4_0
+set CTX=131072
+goto rodar_glm
 
-:executar_glm
-set CTK=%1
-set CTV=%2
-set CTX=%3
-
-set GLM_MODEL=
+:rodar_glm
+set GLM_FILE=
 for %%F in (..\models\*glm*.gguf ..\models\*GLM*.gguf) do (
-    set GLM_MODEL=%%F
+    set GLM_FILE=%%F
 )
 
-if "!GLM_MODEL!"=="" (
+if "!GLM_FILE!"=="" (
     echo.
-    echo [AVISO] Nenhum arquivo .gguf do GLM foi encontrado em ..\models\
-    echo.
-    echo Deseja baixar o modelo GLM-4-9B-Chat Q4_K_M (~5.5 GB) agora? (S/N)
-    choice /C SN /N /M "Digite S ou N: "
-    if errorlevel 2 goto fim
-    if errorlevel 1 (
-        echo.
-        echo Baixando GLM-4-9B-Chat via Hugging Face...
-        python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='THUDM/glm-4-9b-chat-GGUF', filename='glm-4-9b-chat.Q4_K_M.gguf', local_dir=r'..\models')"
-        set GLM_MODEL=..\models\glm-4-9b-chat.Q4_K_M.gguf
-    )
+    echo ====================================================================
+    echo [AVISO] Modelo GLM (.gguf) nao encontrado na pasta models.
+    echo Baixando GLM-4-9B-Chat Q4_K_M automaticamente...
+    echo ====================================================================
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='bartowski/glm-4-9b-chat-GGUF', filename='glm-4-9b-chat-Q4_K_M.gguf', local_dir=r'..\models')"
+    set GLM_FILE=..\models\glm-4-9b-chat-Q4_K_M.gguf
 )
 
 echo.
-echo Iniciando Servidor com !GLM_MODEL! (Contexto: %CTX% tokens, KV: %CTK%)...
-llama-server.exe -m "!GLM_MODEL!" -ngl 99 -fa on -c %CTX% -ctk %CTK% -ctv %CTV% --port 8080 --host 0.0.0.0 -np 1
-exit /b
+echo Iniciando Servidor GLM: !GLM_FILE!
+echo Parametros: Contexto %CTX% tokens - KV Cache: %CTK%
+echo.
+llama-server.exe -m "!GLM_FILE!" -ngl 99 -fa on -c %CTX% -ctk %CTK% -ctv %CTV% --port 8080 --host 0.0.0.0 -np 1
+goto fim
 
 :fim
 pause
