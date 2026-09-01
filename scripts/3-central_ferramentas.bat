@@ -11,8 +11,8 @@ echo.
 echo [1] Testar Pontuacao e Precisao (LiveCodeBench Local)
 echo [2] Abrir Claude Code Local (Aider)
 echo [3] Rodar Diagnostico de Saude do Sistema (Doctor)
-echo [4] Baixar Modelo GLM-4-9B-Chat (GGUF)
-echo [5] Baixar Modelo Rascunho Qwen 0.5B (Speculative)
+echo [4] Abrir Chat Web no Navegador (Interface Grafica no Chrome/Edge)
+echo [5] Baixar Modelo Rascunho Qwen 0.5B (Speculative Turbo)
 echo [6] Sair
 echo.
 echo ====================================================================
@@ -20,7 +20,7 @@ choice /C 123456 /N /M "Selecione uma opcao (1 a 6): "
 
 if errorlevel 6 goto fim
 if errorlevel 5 goto dl_draft
-if errorlevel 4 goto dl_glm
+if errorlevel 4 goto web_chat
 if errorlevel 3 goto doctor
 if errorlevel 2 goto aider
 if errorlevel 1 goto bench
@@ -42,12 +42,10 @@ python -c "import sys; sys.path.append(r'..\agent'); from skills import executar
 pause
 goto fim
 
-:dl_glm
+:web_chat
 echo.
-echo Baixando GLM-4-9B-Chat Q4_K_M (~5.5 GB)...
-python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='THUDM/glm-4-9b-chat-GGUF', filename='glm-4-9b-chat.Q4_K_M.gguf', local_dir=r'..\models')"
-echo Download concluido!
-pause
+echo Abrindo Interface Web no seu Navegador...
+start "" "%~dp0web_chat.html"
 goto fim
 
 :dl_draft
