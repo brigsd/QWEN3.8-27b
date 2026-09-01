@@ -3,18 +3,19 @@ setlocal enabledelayedexpansion
 title Servidor Local de IA (Qwen 3.8 27B / GLM)
 cd /d "%~dp0"
 
+cls
 echo ====================================================================
-echo   🖥️ SERVIDOR LOCAL DE IA - DUAL GPU (RTX 5070 + RTX 2080 Ti)
+echo   SERVIDOR LOCAL DE IA - DUAL GPU (RTX 5070 + RTX 2080 Ti)
 echo ====================================================================
 echo.
-echo Escolha o modelo e a configuracao da Janela de Contexto (KV Cache):
+echo Escolha o modelo e a configuracao da Janela de Contexto:
 echo.
 echo --- [ OPCOES QWEN 3.8 27B ] ----------------------------------------
-echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache) - [RECOMENDADO]
-echo     Uso de VRAM: ~20.6 GB | Precisao Maxima para Programacao
+echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache) - RECOMENDADO
+echo     Uso de VRAM: ~20.6 GB - Precisao Maxima para Programacao
 echo.
 echo [2] Qwen 27B - Modo Gigante 128k (4-bit KV Cache)
-echo     Uso de VRAM: ~22.6 GB | Leitura de Documentos e Livros Longos
+echo     Uso de VRAM: ~22.6 GB - Contexto Longo para Documentos e Livros
 echo.
 echo [3] Qwen 27B - Modo TURBO Especulativo (Draft Model 0.5B)
 echo     Acelera a geracao para ~60 a 75 tokens/s
@@ -23,8 +24,8 @@ echo --- [ OPCOES GLM ] -------------------------------------------------
 echo [4] GLM - Modo 16-bit FP16 (Precisao Maxima Original)
 echo     Janela de Contexto em precisao total sem quantizacao
 echo.
-echo [5] GLM - Modo 8-bit Q8_0 (Otimizado: Metade da VRAM) - [RECOMENDADO]
-echo     Economiza 50%% da VRAM do contexto com ZERO perda de qualidade
+echo [5] GLM - Modo 8-bit Q8_0 (Otimizado: Metade da VRAM) - RECOMENDADO
+echo     Economiza 50 porcento da VRAM do contexto com ZERO perda
 echo.
 echo [6] GLM - Modo 4-bit Q4_0 (Contexto Ultra Longo)
 echo     Maximo espaco de contexto com menor consumo de memoria
@@ -80,7 +81,6 @@ set CTK=%1
 set CTV=%2
 set CTX=%3
 
-rem Procura modelo GLM na pasta models
 set GLM_MODEL=
 for %%F in (..\models\*glm*.gguf ..\models\*GLM*.gguf) do (
     set GLM_MODEL=%%F
