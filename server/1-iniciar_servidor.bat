@@ -11,11 +11,11 @@ echo.
 echo Escolha o modelo e a configuracao de execucao:
 echo.
 echo --- [ OPCOES QWEN 3.8 27B - DUAL GPU (23.4 GB VRAM) ] -------------
-echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache) - RECOMENDADO
-echo     Uso de VRAM: ~20.6 GB - Precisao Maxima para Programacao (~40 tok/s)
+echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache + Visao) - RECOMENDADO
+echo     Uso de VRAM: ~21.0 GB - Precisao Maxima para Programacao (~40 tok/s)
 echo.
-echo [2] Qwen 27B - Modo Gigante 128k (4-bit KV Cache)
-echo     Uso de VRAM: ~22.6 GB - Contexto Longo para Documentos e Projetos
+echo [2] Qwen 27B - Modo Gigante 128k (4-bit KV Cache Puro)
+echo     Uso de VRAM: ~21.5 GB - Contexto Longo para Documentos e Projetos
 echo.
 echo --- [ OPCOES GLM-5.3-FLASH (321B MoE) - C:\glm53_i4 ] -------------
 echo [3] GLM-5.3 (321B) - Modo Otimizado (Auto-Tier Balanceado) - RECOMENDADO
@@ -41,14 +41,14 @@ goto fim
 
 :qwen_64k
 echo.
-echo Iniciando Qwen 3.8 27B (64k, 8-bit KV)...
+echo Iniciando Qwen 3.8 27B (64k, 8-bit KV + Visao)...
 llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf --mmproj ..\models\mmproj-Qwen3.8-27B-f16.gguf -ngl 99 -fa on -c 65536 -ctk q8_0 -ctv q8_0 --port 8080 --host 0.0.0.0 -np 1
 goto fim
 
 :qwen_128k
 echo.
 echo Iniciando Qwen 3.8 27B (128k, 4-bit KV)...
-llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf --mmproj ..\models\mmproj-Qwen3.8-27B-f16.gguf -ngl 99 -fa on -c 131072 -ctk q4_0 -ctv q4_0 --port 8080 --host 0.0.0.0 -np 1
+llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf -ngl 99 -fa on -c 131072 -ctk q4_0 -ctv q4_0 --port 8080 --host 0.0.0.0 -np 1
 goto fim
 
 :glm_balanced
