@@ -62,6 +62,7 @@ mcp_mgr = MCPManager()
 API_BASE = "http://127.0.0.1:8080/v1"
 MODEL_NAME = "default"
 MODEL_DISPLAY = "IA Local"
+FERRAMENTAS_HABILITADAS = True
 
 # Modos de Raciocínio
 MODOS = ["NORMAL", "DEEP_THINK", "AUTO_REFLEXAO"]
@@ -112,7 +113,11 @@ def obter_modelo_ativo() -> Tuple[str, str]:
         pass
     return "qwen3.8-27b", "Qwen 3.8 27B"
 
-def gerar_prompt_sistema(nome_modelo: str) -> str:
+def gerar_prompt_sistema(nome_modelo: str, is_glm: bool = False) -> str:
+    if is_glm:
+        # Para o GLM-5.3 (Streaming de SSD), usamos um prompt ultraleve para prefill instantâneo
+        return "Você é um assistente especialista de inteligência artificial. Responda com precisão, clareza e em Português do Brasil."
+        
     return f"""Você é o Engenheiro de Software e Assistente de Desenvolvimento de Elite operando com o modelo {nome_modelo} diretamente no computador do usuário.
 
 Postura e Diretrizes Fundamentais:
@@ -131,18 +136,16 @@ Postura e Diretrizes Fundamentais:
 
 4. ESTILO DE COMUNICAÇÃO:
    - Seja conciso, técnico e direto ao ponto.
-   - Não narre ações desnecessárias ("Vou abrir o arquivo..."). Execute a ferramenta silenciosamente e apresente a resposta consolidada.
-   - Ao citar código ou arquivos, use a convenção navegável `caminho/arquivo.ext:linha`.
+   - Não narre ações desnecessárias. Execute a ferramenta silenciosamente e apresente a resposta consolidada.
    - Responda SEMPRE em Português (PT-BR).
 """
 
 PROMPT_THINK_EXTENSAO = """
 [DIRETRIZ DE PENSAMENTO PROFUNDO (DEEP THINK)]:
-Antes de responder ou executar ações no disco, elabore sua análise lógica dentro das tags `<think>` e `</think>`:
+Antes de responder, elabore sua análise lógica dentro das tags `<think>` e `</think>`:
 1. Decomponha o problema em partes atômicas e mapeie dependências.
-2. Identifique possíveis armadilhas, casos de borda (entradas nulas, vazamentos) e trade-offs.
-3. Formule um plano de execução passo a passo.
-Após fechar `</think>`, emita a resposta e ferramentas com máxima precisão.
+2. Identifique possíveis armadilhas, casos de borda e trade-offs.
+Após fechar `</think>`, emita a resposta com máxima precisão.
 """
 
 def testar_servidor() -> bool:
@@ -155,31 +158,41 @@ def testar_servidor() -> bool:
 
 def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL") -> Tuple[str, Optional[str]]:
     """Executa o loop de raciocínio com suporte ao modo selecionado."""
+    global FERRAMENTAS_HABILITADAS
     headers = {"Content-Type": "application/json"}
-    ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
     
-    # Atualiza modelo ativo dinamicamente
     mid, mdisp = obter_modelo_ativo()
+    is_glm = "glm" in mid.lower()
     cfg_modo = MODO_INFO[modo]
+    
+    # Se for GLM, enviamos ferramentas apenas se o usuário tiver ativado ou não for chat puro
+    if is_glm and not FERRAMENTAS_HABILITADAS:
+        ferramentas_atuais = None
+    else:
+        ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
     
     hist_local = list(historico)
     if modo == "DEEP_THINK":
         if hist_local and hist_local[0]["role"] == "system":
-            hist_local[0] = {"role": "system", "content": gerar_prompt_sistema(mdisp) + PROMPT_THINK_EXTENSAO}
+            hist_local[0] = {"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm) + PROMPT_THINK_EXTENSAO}
             
     while True:
         payload = {
             "model": mid,
             "messages": hist_local,
-            "tools": ferramentas_atuais,
-            "tool_choice": "auto",
             "temperature": cfg_modo["temp"],
             "min_p": cfg_modo["min_p"]
         }
         
+        if ferramentas_atuais:
+            payload["tools"] = ferramentas_atuais
+            payload["tool_choice"] = "auto"
+            
+        timeout_req = 600 if is_glm else 240
+        
         try:
-            with console.status(f"[cyan]{mdisp} raciocinando no modo {cfg_modo['nome']}...[/cyan]", spinner="dots"):
-                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=240)
+            with console.status(f"[cyan]{mdisp} processando no modo {cfg_modo['nome']}...[/cyan]", spinner="dots"):
+                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=timeout_req)
                 
             if res.status_code != 200:
                 console.print(f"[error]Erro do Servidor ({res.status_code}): {res.text}[/error]")
@@ -232,13 +245,12 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL")
                 
             conteudo_resposta = mensagem.get("content", "")
             
-            # Se for modo AUTO-REFLEXAO e temos uma resposta final de código/análise
-            if modo == "AUTO_REFLEXAO" and len(conteudo_resposta) > 100:
+            # Se for modo AUTO-REFLEXAO
+            if modo == "AUTO_REFLEXAO" and len(conteudo_resposta) > 100 and not is_glm:
                 with console.status(f"[magenta]{mdisp} executando Auto-Reflexão e Auditoria...[/magenta]", spinner="dots"):
                     prompt_critica = (
                         "Examine criticamente a resposta/código anterior. "
-                        "Identifique e corrija se houver: (1) casos de borda não tratados, (2) falhas de concorrência ou tipos, "
-                        "(3) redundâncias. Apresente a versão final corrigida e aprimorada de forma limpa."
+                        "Identifique e corrija se houver casos de borda ou bugs. Apresente a versão final corrigida."
                     )
                     hist_reflexao = list(hist_local) + [
                         {"role": "user", "content": prompt_critica}
@@ -268,13 +280,26 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL")
             return "Falha de conexão com o servidor local.", None
 
 def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
-    """Processa comandos de barra (/modo, /doctor, /review, /security, /simplify, /verify, /mcp, /limpar, /status, /ajuda)."""
-    global modo_atual_idx
+    """Processa comandos de barra."""
+    global modo_atual_idx, FERRAMENTAS_HABILITADAS
     cmd = comando.strip()
     partes = cmd.split(maxsplit=1)
     cmd_base = partes[0].lower()
     arg = partes[1] if len(partes) > 1 else ""
     
+    # ALTERNAR TOOLS ON/OFF
+    if cmd_base in ("/tools", "/tool", "/ferramentas"):
+        if arg.lower() == "off":
+            FERRAMENTAS_HABILITADAS = False
+            console.print("[yellow]Ferramentas em disco desabilitadas (Modo Conversa Rápida).[/yellow]")
+        elif arg.lower() == "on":
+            FERRAMENTAS_HABILITADAS = True
+            console.print("[green]Ferramentas em disco habilitadas (Modo Programador Ativo).[/green]")
+        else:
+            status = "HABILITADAS" if FERRAMENTAS_HABILITADAS else "DESABILITADAS"
+            console.print(f"Status das Ferramentas: **{status}** (Use `/tools on` ou `/tools off`)")
+        return True
+
     # 1. ALTERNAR MODO VIA COMANDO
     if cmd_base in ("/modo", "/mode"):
         arg_lower = arg.lower()
@@ -364,7 +389,7 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         if acao == "on":
             modulo = subpartes[1] if len(subpartes) > 1 else ""
             if not modulo:
-                console.print("[warning]Especifique o módulo. Ex: `/mcp on mecanifica` ou `/mcp on web` ou `/mcp on all`[/warning]")
+                console.print("[warning]Especifique o módulo. Ex: `/mcp on mecanifica` ou `/mcp on web`[/warning]")
             else:
                 ok, msg = mcp_mgr.ativar(modulo)
                 console.print(f"[{'success' if ok else 'error'}]{msg}[/{'success' if ok else 'error'}]")
@@ -380,9 +405,10 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             return True
             
     elif cmd_base in ("/limpar", "/clear"):
-        _, mdisp = obter_modelo_ativo()
+        mid, mdisp = obter_modelo_ativo()
+        is_glm = "glm" in mid.lower()
         historico.clear()
-        historico.append({"role": "system", "content": gerar_prompt_sistema(mdisp)})
+        historico.append({"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm)})
         console.clear()
         console.print("[green]Histórico de conversa limpo com sucesso![/green]")
         return True
@@ -396,6 +422,7 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             f"• **Servidor:** {API_BASE}\n"
             f"• **Modelo Ativo:** {mdisp} (`{mid}`)\n"
             f"• **Modo de Raciocínio:** {cfg['nome']}\n"
+            f"• **Ferramentas Ativas:** {'Sim' if FERRAMENTAS_HABILITADAS else 'Não (Modo Rápido)'}\n"
             f"• **Módulos MCP Ativos:** {', '.join(modulos)}\n"
             f"• **Total de Ferramentas Habilitadas:** {len(ferramentas_atuais)}\n"
             f"• **Mensagens no Histórico:** {len(historico)}",
@@ -410,7 +437,8 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             "• Pressione **[bold yellow]Shift + Tab[/bold yellow]** ou **[bold yellow]F2[/bold yellow]** para alternar modos em tempo real!\n"
             "• `/modo normal`       ➔ Modo ⚡ Rápido e Direto (Min-P 0.05)\n"
             "• `/modo think`        ➔ Modo 🧠 Pensamento Profundo (Chain of Thought)\n"
-            "• `/modo reflexao`     ➔ Modo 🛡️ Auto-Reflexão e Auditoria Interna\n\n"
+            "• `/modo reflexao`     ➔ Modo 🛡️ Auto-Reflexão e Auditoria Interna\n"
+            "• `/tools on/off`      ➔ Liga ou desliga ferramentas no disco (para acelerar o GLM)\n\n"
             "**🚀 Skills e Comandos:**\n"
             "• `/doctor`            ➔ Checkup completo do sistema (Dual GPU, VRAM, Servidor)\n"
             "• `/review <alvo>`     ➔ Auditoria e Code Review Sênior com severidade e linhas\n"
@@ -441,6 +469,7 @@ def main():
         return
         
     mid, mdisp = obter_modelo_ativo()
+    is_glm = "glm" in mid.lower()
     
     console.print(Panel.fit(
         f"[bold cyan]🤖 Agente Nativo Universal ({mdisp})[/bold cyan]\n"
@@ -453,7 +482,7 @@ def main():
     ))
     
     historico = [
-        {"role": "system", "content": gerar_prompt_sistema(mdisp)}
+        {"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm)}
     ]
     
     # Configura prompt_toolkit com KeyBindings
