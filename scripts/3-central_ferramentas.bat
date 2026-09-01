@@ -3,16 +3,17 @@ setlocal enabledelayedexpansion
 title Central de Ferramentas e Benchmarks (IA Local)
 cd /d "%~dp0"
 
+cls
 echo ====================================================================
-echo   🛠️ CENTRAL DE FERRAMENTAS E UTILITARIOS - IA LOCAL
+echo   CENTRAL DE FERRAMENTAS E UTILITARIOS - IA LOCAL
 echo ====================================================================
 echo.
-echo [1] 📊 Testar Pontuacao e Precisao (LiveCodeBench Local)
-echo [2] 🤖 Abrir Claude Code Local (Aider)
-echo [3] 🩺 Rodar Diagnostico de Saude do Sistema (Doctor)
-echo [4] 📥 Baixar Modelo GLM-4-9B-Chat (GGUF)
-echo [5] 📥 Baixar Modelo Rascunho Qwen 0.5B (Speculative)
-echo [6] 🚪 Sair
+echo [1] Testar Pontuacao e Precisao (LiveCodeBench Local)
+echo [2] Abrir Claude Code Local (Aider)
+echo [3] Rodar Diagnostico de Saude do Sistema (Doctor)
+echo [4] Baixar Modelo GLM-4-9B-Chat (GGUF)
+echo [5] Baixar Modelo Rascunho Qwen 0.5B (Speculative)
+echo [6] Sair
 echo.
 echo ====================================================================
 choice /C 123456 /N /M "Selecione uma opcao (1 a 6): "
