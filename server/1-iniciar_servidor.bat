@@ -1,75 +1,44 @@
 @echo off
 setlocal enabledelayedexpansion
-title Servidor Local de IA (Qwen 3.8 27B / GLM-5.3-Flash 321B)
+title Servidor Qwen 3.8 27B Dual GPU (RTX 5070 + RTX 2080 Ti)
 cd /d "%~dp0"
 
 cls
 echo ====================================================================
-echo   SERVIDOR LOCAL DE IA - DUAL GPU (RTX 5070 + RTX 2080 Ti)
+echo   SERVIDOR QWEN 3.8 27B - DUAL GPU (RTX 5070 12GB + RTX 2080 Ti 11GB)
 echo ====================================================================
 echo.
-echo Escolha o modelo e a configuracao de execucao:
+echo Escolha a configuracao de execucao:
 echo.
-echo --- [ OPCOES QWEN 3.8 27B - DUAL GPU (23.4 GB VRAM) ] -------------
-echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache + Visao) - RECOMENDADO
-echo     Uso de VRAM: ~21.0 GB - Precisao Maxima para Programacao (~40 tok/s)
+echo [1] Qwen 27B - Modo Precisao 64k (8-bit KV Cache + Visao Multimodal) - RECOMENDADO
+echo     Uso de VRAM: ~21.0 GB - Velocidade Maxima (~40 tok/s) para Programacao e Imagens
 echo.
 echo [2] Qwen 27B - Modo Gigante 128k (4-bit KV Cache Puro)
-echo     Uso de VRAM: ~21.5 GB - Contexto Longo para Documentos e Projetos
-echo.
-echo --- [ OPCOES GLM-5.3-FLASH (321B MoE) - C:\glm53_i4 ] -------------
-echo [3] GLM-5.3 (321B) - Modo Otimizado (Auto-Tier Balanceado) - RECOMENDADO
-echo     Gerenciamento automatico de VRAM e cache de experts
-echo.
-echo [4] GLM-5.3 (321B) - Modo Precisao Total (Policy Quality)
-echo     Execucao completa com maxima fidelidade nos 62 shards
-echo.
-echo [5] GLM-5.3 (321B) - Modo Turbo Fast (Experimental Fast)
-echo     Latencia reduzida para respostas ultra ageis
+echo     Uso de VRAM: ~21.5 GB - Contexto Ultra Longo para Grandes Projetos e Documentos
 echo.
 echo ====================================================================
-choice /C 12345 /N /M "Selecione uma opcao (1 a 5): "
+choice /C 12 /N /M "Selecione uma opcao (1 ou 2): "
 
 set OPCAO=%ERRORLEVEL%
 
 if "%OPCAO%"=="1" goto qwen_64k
 if "%OPCAO%"=="2" goto qwen_128k
-if "%OPCAO%"=="3" goto glm_balanced
-if "%OPCAO%"=="4" goto glm_quality
-if "%OPCAO%"=="5" goto glm_fast
 goto fim
 
 :qwen_64k
 echo.
-echo Iniciando Qwen 3.8 27B (64k, 8-bit KV + Visao)...
+echo ====================================================================
+echo Iniciando Qwen 3.8 27B (64k Contexto, 8-bit KV, Visao Ativa)...
+echo ====================================================================
 llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf --mmproj ..\models\mmproj-Qwen3.8-27B-f16.gguf -ngl 99 -fa on -c 65536 -ctk q8_0 -ctv q8_0 --port 8080 --host 0.0.0.0 -np 1
 goto fim
 
 :qwen_128k
 echo.
-echo Iniciando Qwen 3.8 27B (128k, 4-bit KV)...
+echo ====================================================================
+echo Iniciando Qwen 3.8 27B (128k Contexto Gigante, 4-bit KV Puro)...
+echo ====================================================================
 llama-server.exe -m ..\models\Qwen3.8-27B-Q4_K_M.gguf -ngl 99 -fa on -c 131072 -ctk q4_0 -ctv q4_0 --port 8080 --host 0.0.0.0 -np 1
-goto fim
-
-:glm_balanced
-echo.
-echo Iniciando Servidor GLM-5.3-Flash 321B (Modo Auto-Tier Balanceado)...
-set OMP_NUM_THREADS=%NUMBER_OF_PROCESSORS%
-python ..\colibri\c\coli serve --model "C:\glm53_i4" --auto-tier --policy balanced --port 8080
-goto fim
-
-:glm_quality
-echo.
-echo Iniciando Servidor GLM-5.3-Flash 321B (Modo Quality)...
-set OMP_NUM_THREADS=%NUMBER_OF_PROCESSORS%
-python ..\colibri\c\coli serve --model "C:\glm53_i4" --policy quality --port 8080
-goto fim
-
-:glm_fast
-echo.
-echo Iniciando Servidor GLM-5.3-Flash 321B (Modo Experimental Fast)...
-set OMP_NUM_THREADS=%NUMBER_OF_PROCESSORS%
-python ..\colibri\c\coli serve --model "C:\glm53_i4" --policy experimental-fast --port 8080
 goto fim
 
 :fim
