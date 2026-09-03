@@ -1,7 +1,6 @@
 """
-Agente Nativo Universal (CLI) - Supreme Edition
-Compatível com Qwen 3.8 27B e GLM-5.3-Flash (321B)
-Auto-descoberta dinâmica de modelo e suporte a 3 Modos de Raciocínio (Shift+Tab):
+Agente Nativo Qwen 3.8 27B (CLI) - Supreme Edition
+Dual GPU (RTX 5070 + RTX 2080 Ti) • 3 Modos de Raciocínio (Shift+Tab ou F2):
 1. ⚡ NORMAL (Direto + Min-P Sampling)
 2. 🧠 PENSAMENTO PROFUNDO (CoT + Scratchpad Interno)
 3. 🛡️ AUTO-REFLEXÃO (Geração + Auditoria e Auto-Correção)
@@ -60,9 +59,7 @@ console = Console(theme=custom_theme)
 mcp_mgr = MCPManager()
 
 API_BASE = "http://127.0.0.1:8080/v1"
-MODEL_NAME = "default"
-MODEL_DISPLAY = "IA Local"
-FERRAMENTAS_HABILITADAS = True
+MODEL_NAME = "qwen3.8-27b"
 
 # Modos de Raciocínio
 MODOS = ["NORMAL", "DEEP_THINK", "AUTO_REFLEXAO"]
@@ -92,33 +89,7 @@ MODO_INFO = {
 
 modo_atual_idx = 0
 
-def obter_modelo_ativo() -> Tuple[str, str]:
-    """Descobre dinamicamente qual modelo está rodando no servidor na porta 8080."""
-    global MODEL_NAME, MODEL_DISPLAY
-    try:
-        res = requests.get(f"{API_BASE}/models", timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            if "data" in data and len(data["data"]) > 0:
-                mid = data["data"][0]["id"]
-                MODEL_NAME = mid
-                if "glm" in mid.lower():
-                    MODEL_DISPLAY = "GLM-5.3-Flash (321B MoE)"
-                elif "qwen" in mid.lower():
-                    MODEL_DISPLAY = "Qwen 3.8 27B"
-                else:
-                    MODEL_DISPLAY = mid.upper()
-                return MODEL_NAME, MODEL_DISPLAY
-    except Exception:
-        pass
-    return "qwen3.8-27b", "Qwen 3.8 27B"
-
-def gerar_prompt_sistema(nome_modelo: str, is_glm: bool = False) -> str:
-    if is_glm:
-        # Para o GLM-5.3 (Streaming de SSD), usamos um prompt ultraleve para prefill instantâneo
-        return "Você é um assistente especialista de inteligência artificial. Responda com precisão, clareza e em Português do Brasil."
-        
-    return f"""Você é o Engenheiro de Software e Assistente de Desenvolvimento de Elite operando com o modelo {nome_modelo} diretamente no computador do usuário.
+PROMPT_SISTEMA_BASE = """Você é o Engenheiro de Software e Assistente de Desenvolvimento de Elite do Qwen 3.8 27B, operando diretamente na máquina do usuário via Dual GPU (RTX 5070 + RTX 2080 Ti).
 
 Postura e Diretrizes Fundamentais:
 1. ATUAÇÃO PRÁTICA E PROATIVA (Bias for Action):
@@ -137,66 +108,68 @@ Postura e Diretrizes Fundamentais:
 4. ESTILO DE COMUNICAÇÃO:
    - Seja conciso, técnico e direto ao ponto.
    - Não narre ações desnecessárias. Execute a ferramenta silenciosamente e apresente a resposta consolidada.
+   - Ao citar código ou arquivos, use a convenção navegável `caminho/arquivo.ext:linha`.
    - Responda SEMPRE em Português (PT-BR).
 """
 
 PROMPT_THINK_EXTENSAO = """
 [DIRETRIZ DE PENSAMENTO PROFUNDO (DEEP THINK)]:
-Antes de responder, elabore sua análise lógica dentro das tags `<think>` e `</think>`:
+Antes de responder ou executar ações no disco, elabore sua análise lógica dentro das tags `<think>` e `</think>`:
 1. Decomponha o problema em partes atômicas e mapeie dependências.
 2. Identifique possíveis armadilhas, casos de borda e trade-offs.
-Após fechar `</think>`, emita a resposta com máxima precisão.
+3. Formule um plano de execução passo a passo.
+Após fechar `</think>`, emita a resposta e ferramentas com máxima precisão.
 """
 
 def testar_servidor() -> bool:
-    """Verifica se o servidor está ativo na porta 8080."""
+    """Verifica se o servidor llama.cpp está ativo na porta 8080."""
     try:
-        res = requests.get(f"{API_BASE}/models", timeout=3)
+        res = requests.get(f"{API_BASE}/models", timeout=2)
         return res.status_code == 200
     except Exception:
         return False
 
+def obter_model_id_ativo() -> str:
+    """Retorna o ID registrado pelo llama-server."""
+    try:
+        res = requests.get(f"{API_BASE}/models", timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            if "data" in data and len(data["data"]) > 0:
+                return data["data"][0]["id"]
+    except Exception:
+        pass
+    return "qwen3.8-27b"
+
 def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL") -> Tuple[str, Optional[str]]:
     """Executa o loop de raciocínio com suporte ao modo selecionado."""
-    global FERRAMENTAS_HABILITADAS
     headers = {"Content-Type": "application/json"}
-    
-    mid, mdisp = obter_modelo_ativo()
-    is_glm = "glm" in mid.lower()
+    ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
     cfg_modo = MODO_INFO[modo]
-    
-    # Se for GLM, enviamos ferramentas apenas se o usuário tiver ativado ou não for chat puro
-    if is_glm and not FERRAMENTAS_HABILITADAS:
-        ferramentas_atuais = None
-    else:
-        ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
+    model_id = obter_model_id_ativo()
     
     hist_local = list(historico)
     if modo == "DEEP_THINK":
         if hist_local and hist_local[0]["role"] == "system":
-            hist_local[0] = {"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm) + PROMPT_THINK_EXTENSAO}
+            hist_local[0] = {"role": "system", "content": PROMPT_SISTEMA_BASE + PROMPT_THINK_EXTENSAO}
             
     while True:
         payload = {
-            "model": mid,
+            "model": model_id,
             "messages": hist_local,
+            "tools": ferramentas_atuais,
+            "tool_choice": "auto",
             "temperature": cfg_modo["temp"],
             "min_p": cfg_modo["min_p"]
         }
         
-        if ferramentas_atuais:
-            payload["tools"] = ferramentas_atuais
-            payload["tool_choice"] = "auto"
-            
-        timeout_req = 600 if is_glm else 240
-        
         try:
-            with console.status(f"[cyan]{mdisp} processando no modo {cfg_modo['nome']}...[/cyan]", spinner="dots"):
-                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=timeout_req)
+            with console.status(f"[cyan]Qwen 27B raciocinando no modo {cfg_modo['nome']}...[/cyan]", spinner="dots"):
+                res = requests.post(f"{API_BASE}/chat/completions", json=payload, headers=headers, timeout=180)
                 
             if res.status_code != 200:
                 console.print(f"[error]Erro do Servidor ({res.status_code}): {res.text}[/error]")
-                return "Ocorreu um erro ao comunicar com o servidor de IA.", None
+                return "Ocorreu um erro ao comunicar com o servidor Qwen 27B.", None
                 
             data = res.json()
             escolha = data["choices"][0]
@@ -246,22 +219,23 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL")
             conteudo_resposta = mensagem.get("content", "")
             
             # Se for modo AUTO-REFLEXAO
-            if modo == "AUTO_REFLEXAO" and len(conteudo_resposta) > 100 and not is_glm:
-                with console.status(f"[magenta]{mdisp} executando Auto-Reflexão e Auditoria...[/magenta]", spinner="dots"):
+            if modo == "AUTO_REFLEXAO" and len(conteudo_resposta) > 100:
+                with console.status("[magenta]Qwen 27B executando Auto-Reflexão e Auditoria Interna...[/magenta]", spinner="dots"):
                     prompt_critica = (
                         "Examine criticamente a resposta/código anterior. "
-                        "Identifique e corrija se houver casos de borda ou bugs. Apresente a versão final corrigida."
+                        "Identifique e corrija se houver: (1) casos de borda não tratados, (2) falhas de tipos ou concorrência, "
+                        "(3) redundâncias. Apresente a versão final corrigida e aprimorada de forma limpa."
                     )
                     hist_reflexao = list(hist_local) + [
                         {"role": "user", "content": prompt_critica}
                     ]
                     payload_ref = {
-                        "model": mid,
+                        "model": model_id,
                         "messages": hist_reflexao,
                         "temperature": 0.2,
                         "min_p": 0.05
                     }
-                    res_ref = requests.post(f"{API_BASE}/chat/completions", json=payload_ref, headers=headers, timeout=180)
+                    res_ref = requests.post(f"{API_BASE}/chat/completions", json=payload_ref, headers=headers, timeout=120)
                     if res_ref.status_code == 200:
                         conteudo_refinado = res_ref.json()["choices"][0]["message"].get("content", "")
                         return conteudo_refinado, "Auditoria de Auto-Reflexão Aplicada"
@@ -276,30 +250,17 @@ def executar_ciclo_agente(historico: List[Dict[str, Any]], modo: str = "NORMAL")
             return conteudo_resposta, pensamento
             
         except requests.exceptions.RequestException as e:
-            console.print(f"[error]Erro de rede com o servidor: {e}[/error]")
+            console.print(f"[error]Erro de rede com o servidor Qwen: {e}[/error]")
             return "Falha de conexão com o servidor local.", None
 
 def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
     """Processa comandos de barra."""
-    global modo_atual_idx, FERRAMENTAS_HABILITADAS
+    global modo_atual_idx
     cmd = comando.strip()
     partes = cmd.split(maxsplit=1)
     cmd_base = partes[0].lower()
     arg = partes[1] if len(partes) > 1 else ""
     
-    # ALTERNAR TOOLS ON/OFF
-    if cmd_base in ("/tools", "/tool", "/ferramentas"):
-        if arg.lower() == "off":
-            FERRAMENTAS_HABILITADAS = False
-            console.print("[yellow]Ferramentas em disco desabilitadas (Modo Conversa Rápida).[/yellow]")
-        elif arg.lower() == "on":
-            FERRAMENTAS_HABILITADAS = True
-            console.print("[green]Ferramentas em disco habilitadas (Modo Programador Ativo).[/green]")
-        else:
-            status = "HABILITADAS" if FERRAMENTAS_HABILITADAS else "DESABILITADAS"
-            console.print(f"Status das Ferramentas: **{status}** (Use `/tools on` ou `/tools off`)")
-        return True
-
     # 1. ALTERNAR MODO VIA COMANDO
     if cmd_base in ("/modo", "/mode"):
         arg_lower = arg.lower()
@@ -332,12 +293,11 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         relatorio, prompt_ia = executar_verify(pasta)
         console.print(Panel(Markdown(relatorio), title="[bold cyan]Verify - Execução de Testes[/bold cyan]", border_style="cyan"))
         if prompt_ia:
-            _, mdisp = obter_modelo_ativo()
-            console.print(f"[yellow]Acionando {mdisp} para analisar o traceback do erro...[/yellow]")
+            console.print("[yellow]Acionando Qwen 27B para analisar o traceback do erro...[/yellow]")
             historico.append({"role": "user", "content": prompt_ia})
             resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
             console.print()
-            console.print(Panel(Markdown(resposta), title=f"[bold red]Diagnóstico de Falha ({mdisp})[/bold red]", border_style="red"))
+            console.print(Panel(Markdown(resposta), title="[bold red]Diagnóstico de Falha (Qwen 27B)[/bold red]", border_style="red"))
         return True
 
     # 4. SKILL: CODE REVIEW
@@ -345,11 +305,10 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         alvo = arg or "."
         prompt_rev = obter_prompt_review(alvo)
         historico.append({"role": "user", "content": prompt_rev})
-        _, mdisp = obter_modelo_ativo()
-        console.print(f"[cyan]Iniciando Code Review Sênior em '{alvo}' com {mdisp}...[/cyan]")
+        console.print(f"[cyan]Iniciando Code Review Sênior em '{alvo}' com Qwen 27B...[/cyan]")
         resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
-        console.print(Panel(Markdown(resposta), title=f"[bold cyan]Code Review ({mdisp})[/bold cyan]", border_style="cyan"))
+        console.print(Panel(Markdown(resposta), title="[bold cyan]Code Review (Qwen 27B)[/bold cyan]", border_style="cyan"))
         return True
 
     # 5. SKILL: SECURITY REVIEW
@@ -357,11 +316,10 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
         alvo = arg or "."
         prompt_sec = obter_prompt_security(alvo)
         historico.append({"role": "user", "content": prompt_sec})
-        _, mdisp = obter_modelo_ativo()
-        console.print(f"[cyan]Iniciando Auditoria de Segurança OWASP em '{alvo}' com {mdisp}...[/cyan]")
+        console.print(f"[cyan]Iniciando Auditoria de Segurança OWASP em '{alvo}' com Qwen 27B...[/cyan]")
         resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
-        console.print(Panel(Markdown(resposta), title=f"[bold magenta]Auditoria de Segurança ({mdisp})[/bold magenta]", border_style="magenta"))
+        console.print(Panel(Markdown(resposta), title="[bold magenta]Auditoria de Segurança (Qwen 27B)[/bold magenta]", border_style="magenta"))
         return True
 
     # 6. SKILL: SIMPLIFY
@@ -371,11 +329,10 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             return True
         prompt_simp = obter_prompt_simplify(arg)
         historico.append({"role": "user", "content": prompt_simp})
-        _, mdisp = obter_modelo_ativo()
-        console.print(f"[cyan]Iniciando Refatoração e Simplificação em '{arg}' com {mdisp}...[/cyan]")
+        console.print(f"[cyan]Iniciando Refatoração e Simplificação em '{arg}' com Qwen 27B...[/cyan]")
         resposta, _ = executar_ciclo_agente(historico, MODOS[modo_atual_idx])
         console.print()
-        console.print(Panel(Markdown(resposta), title=f"[bold green]Código Simplificado ({mdisp})[/bold green]", border_style="green"))
+        console.print(Panel(Markdown(resposta), title="[bold green]Código Simplificado (Qwen 27B)[/bold green]", border_style="green"))
         return True
 
     # 7. GERENCIADOR MCP
@@ -405,28 +362,24 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             return True
             
     elif cmd_base in ("/limpar", "/clear"):
-        mid, mdisp = obter_modelo_ativo()
-        is_glm = "glm" in mid.lower()
         historico.clear()
-        historico.append({"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm)})
+        historico.append({"role": "system", "content": PROMPT_SISTEMA_BASE})
         console.clear()
         console.print("[green]Histórico de conversa limpo com sucesso![/green]")
         return True
         
     elif cmd_base in ("/status", "/info"):
         cfg = MODO_INFO[MODOS[modo_atual_idx]]
-        mid, mdisp = obter_modelo_ativo()
         ferramentas_atuais = mcp_mgr.obter_ferramentas_ativas(ESQUEMA_FERRAMENTAS)
         modulos = list(mcp_mgr.modulos_ativos) if mcp_mgr.modulos_ativos else ["Nenhum (Apenas Nativas)"]
         console.print(Panel(
             f"• **Servidor:** {API_BASE}\n"
-            f"• **Modelo Ativo:** {mdisp} (`{mid}`)\n"
+            f"• **Modelo:** Qwen 3.8 27B Supreme (Dual GPU)\n"
             f"• **Modo de Raciocínio:** {cfg['nome']}\n"
-            f"• **Ferramentas Ativas:** {'Sim' if FERRAMENTAS_HABILITADAS else 'Não (Modo Rápido)'}\n"
             f"• **Módulos MCP Ativos:** {', '.join(modulos)}\n"
             f"• **Total de Ferramentas Habilitadas:** {len(ferramentas_atuais)}\n"
             f"• **Mensagens no Histórico:** {len(historico)}",
-            title="[bold cyan]Status do Agente[/bold cyan]",
+            title="[bold cyan]Status do Agente Qwen 27B[/bold cyan]",
             border_style="cyan"
         ))
         return True
@@ -437,8 +390,7 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
             "• Pressione **[bold yellow]Shift + Tab[/bold yellow]** ou **[bold yellow]F2[/bold yellow]** para alternar modos em tempo real!\n"
             "• `/modo normal`       ➔ Modo ⚡ Rápido e Direto (Min-P 0.05)\n"
             "• `/modo think`        ➔ Modo 🧠 Pensamento Profundo (Chain of Thought)\n"
-            "• `/modo reflexao`     ➔ Modo 🛡️ Auto-Reflexão e Auditoria Interna\n"
-            "• `/tools on/off`      ➔ Liga ou desliga ferramentas no disco (para acelerar o GLM)\n\n"
+            "• `/modo reflexao`     ➔ Modo 🛡️ Auto-Reflexão e Auditoria Interna\n\n"
             "**🚀 Skills e Comandos:**\n"
             "• `/doctor`            ➔ Checkup completo do sistema (Dual GPU, VRAM, Servidor)\n"
             "• `/review <alvo>`     ➔ Auditoria e Code Review Sênior com severidade e linhas\n"
@@ -458,31 +410,29 @@ def tratar_comando_barra(comando: str, historico: List[Dict[str, Any]]) -> bool:
 def main():
     global modo_atual_idx
     
+    console.print(Panel.fit(
+        "[bold cyan]🤖 Agente Nativo Qwen 3.8 27B (Supreme Intelligence Edition)[/bold cyan]\n"
+        "[dim]Dual GPU (RTX 5070 + RTX 2080 Ti) • 3 Modos de Reasoning (Shift+Tab) • Skills de Elite[/dim]\n\n"
+        "• Pressione [bold yellow]Shift + Tab[/bold yellow] ou [bold yellow]F2[/bold yellow] para alternar: [green]⚡ NORMAL[/green] | [cyan]🧠 PENSAMENTO[/cyan] | [magenta]🛡️ REFLEXÃO[/magenta]\n"
+        "• Digite [cyan]/ajuda[/cyan] para ver todas as Skills e comandos\n"
+        "• Digite [bold red]sair[/bold red] para encerrar.",
+        border_style="cyan"
+    ))
+    
     if not testar_servidor():
         console.print(Panel(
-            "[bold red][X] Servidor de IA não encontrado em http://127.0.0.1:8080[/bold red]\n\n"
+            "[bold red][X] Servidor Qwen 27B não encontrado em http://127.0.0.1:8080[/bold red]\n\n"
             "Por favor, inicie o servidor primeiro usando o atalho:\n"
-            "[yellow]1 - Iniciar Servidor de IA (Qwen ou GLM).lnk[/yellow]",
+            "[yellow]1 - Iniciar Servidor Qwen 27B (Dual GPU).lnk[/yellow]",
             border_style="red"
         ))
         input("\nPressione ENTER para fechar...")
         return
         
-    mid, mdisp = obter_modelo_ativo()
-    is_glm = "glm" in mid.lower()
-    
-    console.print(Panel.fit(
-        f"[bold cyan]🤖 Agente Nativo Universal ({mdisp})[/bold cyan]\n"
-        f"[dim]Dual GPU • 3 Modos de Reasoning (Shift+Tab) • Skills de Elite • MCP Dinâmico[/dim]\n\n"
-        f"• Conectado ao modelo: [bold green]{mdisp}[/bold green] (ID: `{mid}`)\n"
-        f"• Pressione [bold yellow]Shift + Tab[/bold yellow] ou [bold yellow]F2[/bold yellow] para alternar: [green]⚡ NORMAL[/green] | [cyan]🧠 PENSAMENTO[/cyan] | [magenta]🛡️ REFLEXÃO[/magenta]\n"
-        f"• Digite [cyan]/ajuda[/cyan] para ver todas as Skills e comandos\n"
-        f"• Digite [bold red]sair[/bold red] para encerrar.",
-        border_style="cyan"
-    ))
+    console.print("[success][OK] Conectado ao Servidor Qwen 3.8 27B com sucesso![/success]\n")
     
     historico = [
-        {"role": "system", "content": gerar_prompt_sistema(mdisp, is_glm)}
+        {"role": "system", "content": PROMPT_SISTEMA_BASE}
     ]
     
     # Configura prompt_toolkit com KeyBindings
@@ -539,7 +489,7 @@ def main():
                 
             console.print(Panel(
                 Markdown(resposta),
-                title=f"[bold cyan]{mdisp} ({cfg['nome']})[/bold cyan]",
+                title=f"[bold cyan]Qwen 27B ({cfg['nome']})[/bold cyan]",
                 border_style="cyan",
                 padding=(1, 2)
             ))
