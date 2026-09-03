@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Web Local - Qwen & GLM</title>
+  <title>Chat Web Local - Qwen 3.8 27B Dual GPU</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/core.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/python.min.js"></script>
@@ -115,7 +115,7 @@
 </head>
 <body>
   <header>
-    <div class="brand">⚡ IA Local - Web Chat</div>
+    <div class="brand">⚡ Qwen 3.8 27B - Dual GPU Web Chat</div>
     <div class="status-badge" id="status-badge">
       <div class="status-dot"></div>
       <span id="model-label">Conectando...</span>
@@ -125,8 +125,8 @@
   <main>
     <div id="chat-container">
       <div class="message assistant">
-        <div class="msg-header">Assistente Local</div>
-        <div class="msg-bubble">Olá! Estou conectado ao seu servidor local. Como posso te ajudar hoje?</div>
+        <div class="msg-header">Qwen 3.8 27B</div>
+        <div class="msg-bubble">Olá! Estou operando 100% na sua Dual GPU (RTX 5070 + RTX 2080 Ti). Como posso te ajudar hoje?</div>
       </div>
     </div>
 
@@ -138,7 +138,7 @@
 
   <script>
     const API_BASE = "http://127.0.0.1:8080/v1";
-    let activeModel = "default";
+    let activeModel = "qwen3.8-27b";
     const chatContainer = document.getElementById("chat-container");
     const promptInput = document.getElementById("prompt-input");
     const inputForm = document.getElementById("input-form");
@@ -146,7 +146,7 @@
     const modelLabel = document.getElementById("model-label");
     
     let history = [
-      { role: "system", content: "Você é um assistente de IA prestativo, inteligente e responde sempre em Português (PT-BR)." }
+      { role: "system", content: "Você é o assistente de desenvolvimento e engenharia do Qwen 3.8 27B, respondendo sempre com precisão técnica em Português (PT-BR)." }
     ];
 
     async function checkModel() {
@@ -156,7 +156,9 @@
           const data = await res.json();
           if (data.data && data.data.length > 0) {
             activeModel = data.data[0].id;
-            modelLabel.innerText = activeModel.includes("glm") ? "GLM-5.3-Flash (321B)" : activeModel.includes("qwen") ? "Qwen 3.8 27B" : activeModel;
+            modelLabel.innerText = "Qwen 3.8 27B (Dual GPU)";
+            document.getElementById("status-badge").style.background = "#166534";
+            document.getElementById("status-badge").style.color = "#86efac";
             return;
           }
         }
@@ -197,7 +199,7 @@
           body: JSON.stringify({
             model: activeModel,
             messages: history,
-            temperature: 0.3
+            temperature: 0.2
           })
         });
 
@@ -220,7 +222,7 @@
       const msgDiv = document.createElement("div");
       msgDiv.className = `message ${role}`;
       msgDiv.innerHTML = `
-        <div class="msg-header">${role === "user" ? "Você" : "Assistente"}</div>
+        <div class="msg-header">${role === "user" ? "Você" : "Qwen 27B"}</div>
         <div class="msg-bubble">${escapeHtml(text)}</div>
       `;
       chatContainer.appendChild(msgDiv);
