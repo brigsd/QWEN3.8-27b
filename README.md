@@ -1,12 +1,12 @@
-# 🚀 Ecossistema Local de IA: Qwen 3.8 27B & GLM (Dual GPU)
+# 🚀 Ecossistema Local de IA: Qwen 3.8 27B Supreme Edition (Dual GPU)
 
-Ambiente de execução local de alta performance para modelos de fronteira (**Qwen 3.8 27B** e **GLM**), com aceleração por **Dual GPU (RTX 5070 + RTX 2080 Ti = 23.4 GB VRAM)**, quantização de contexto flexível (**16-bit FP16, 8-bit Q8_0 e 4-bit Q4_0**), motor de busca **BM25**, gerenciador **MCP Dinâmico (`/mcp`)**, **Skills de Engenharia** e **3 Modos de Raciocínio (`Shift+Tab`)**.
+Ambiente de execução local de alta performance para o modelo de fronteira **Qwen 3.8 27B**, com aceleração por **Dual GPU (RTX 5070 12GB + RTX 2080 Ti 11GB = 23.4 GB VRAM)**, quantização de contexto calibrada (**64k com Visão Multimodal e 128k Contexto Gigante**), motor de busca **BM25**, gerenciador **MCP Dinâmico (`/mcp`)**, **Skills de Engenharia** e **3 Modos de Raciocínio (`Shift+Tab`)**.
 
 ---
 
 ## 📑 Índice
 1. [🖥️ Os 3 Atalhos Definitivos na Área de Trabalho](#️-os-3-atalhos-definitivos-na-área-de-trabalho)
-2. [🎛️ Suporte ao GLM com Seletor 16-bit vs 8-bit](#️-suporte-ao-glm-com-seletor-16-bit-vs-8-bit)
+2. [🎛️ Modos de Execução do Servidor (Dual GPU)](#️-modos-de-execução-do-servidor-dual-gpu)
 3. [🧠 Os 3 Modos de Raciocínio (Alternáveis via Shift+Tab)](#-os-3-modos-de-raciocínio)
 4. [🚀 Skills Especializadas de Engenharia](#-skills-especializadas-de-engenharia)
 5. [🤖 Agente Nativo com Tool Calling & BM25](#-agente-nativo-com-tool-calling--bm25)
@@ -20,28 +20,24 @@ Organizamos todo o ecossistema em **apenas 3 atalhos numerados e elegantes**:
 
 ```
  ┌────────────────────────────────────────────────────────┐
- │ 1 - Iniciar Servidor de IA (Qwen ou GLM)              │ ──► Sobe o Qwen (64k/128k/Turbo) ou GLM (16/8/4-bit)
+ │ 1 - Iniciar Servidor Qwen 27B (Dual GPU)               │ ──► Sobe o servidor llama.cpp (64k com Visão ou 128k Gigante)
  ├────────────────────────────────────────────────────────┤
  │ 2 - Abrir Agente Nativo de Desenvolvimento             │ ──► Agente de Código com BM25, MCP, Skills e Shift+Tab
  ├────────────────────────────────────────────────────────┤
- │ 3 - Central de Ferramentas e Benchmarks                │ ──► Bateria de Testes (LiveCodeBench), Aider e Doctor
+ │ 3 - Central de Ferramentas e Benchmarks                │ ──► Bateria de Testes (LiveCodeBench), Aider, Doctor e Web Chat
  └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🎛️ Suporte ao GLM com Seletor 16-bit vs 8-bit
+## 🎛️ Modos de Execução do Servidor (Dual GPU)
 
-O servidor unificado permite alternar o modelo e a precisão do KV Cache com 1 clique:
+O servidor calibrado permite alternar a janela de contexto com 1 clique:
 
-| Opção no Menu | Modelo | Janela de Contexto (KV Cache) | Economia de Memória |
-| :--- | :--- | :--- | :---: |
-| **[1]** | **Qwen 27B** | 64k Tokens (8-bit Q8_0) | **Recomendado** (Folga de 2.8 GB VRAM) |
-| **[2]** | **Qwen 27B** | 128k Tokens (4-bit Q4_0) | Contexto Gigante |
-| **[3]** | **Qwen 27B** | Modo TURBO Especulativo (Draft 0.5B) | Aceleração para ~60-75 tok/s |
-| **[4]** | **GLM** | 16-bit FP16 | Precisão Máxima Original |
-| **[5]** | **GLM** | 8-bit Q8_0 | **Otimizado:** Metade da VRAM com perda ZERO |
-| **[6]** | **GLM** | 4-bit Q4_0 | Contexto Ultra Longo |
+| Opção no Menu | Modo | Janela de Contexto | VRAM Utilizada | Velocidade | Melhor Uso |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **[1]** | **Precisão 64k (8-bit KV + Visão)** | 65.536 Tokens | ~21.0 GB / 23.4 GB | **~40 tok/s** | **RECOMENDADO** (Programação, refatoração, análise de imagens e precisão máxima) |
+| **[2]** | **Gigante 128k (4-bit KV Puro)** | 131.072 Tokens | ~21.5 GB / 23.4 GB | **~35 tok/s** | Projetos gigantes, documentação pesada e múltiplos repositórios |
 
 ---
 
